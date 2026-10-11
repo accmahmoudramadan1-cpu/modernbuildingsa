@@ -1,8 +1,8 @@
 import NextImage from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-server";
-import CartButton from "@/app/components/CartButton";
-import ProductSearch from "@/app/components/ProductSearch";
+import CartButton from "@/components/CartButton";
+import ProductSearch from "@/components/ProductSearch";
 type Category = {
   id: string;
   name: string;
@@ -467,3 +467,4 @@ export default async function Home() {
     </main>
   );
 }
+

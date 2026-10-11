@@ -2,8 +2,8 @@ import { createClient } from "@/lib/supabase-server";
 import NextImage from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import AddToCartButton from "@/app/components/AddToCartButton";
-import ProductGallery from "@/app/components/ProductGallery";
+import AddToCartButton from "@/components/AddToCartButton";
+import ProductGallery from "@/components/ProductGallery";
 
 type Product = {
   id: string;

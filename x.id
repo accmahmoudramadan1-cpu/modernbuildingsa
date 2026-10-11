@@ -1,0 +1,1 @@
+export function CartProvider({children}:{children:any}){ const [cart,setCart]=useState([] as any[]); const addToCart=(p:any)= f=c.find((x:any)===p.id); return f?c.map((x:any)===p.id?{...x,quantity:(x.quantity

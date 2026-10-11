@@ -619,3 +619,4 @@ async function updateCategory(e: React.FormEvent) {
     </main>
   );
 }
+

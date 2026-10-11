@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useCart } from "@/app/components/CartProvider";
+import { useCart } from "@/components/CartProvider";
 
 type AddToCartButtonProps = {
   product: {
@@ -39,3 +39,4 @@ export default function AddToCartButton({
     </button>
   );
 }
+

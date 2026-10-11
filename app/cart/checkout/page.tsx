@@ -4,7 +4,7 @@ import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-client";
-import { useCart } from "@/app/components/CartProvider";
+import { useCart } from "@/components/CartProvider";
 
 export default function CheckoutPage() {
   const router = useRouter();
@@ -313,3 +313,4 @@ export default function CheckoutPage() {
     </main>
   );
 }
+

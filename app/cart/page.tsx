@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCart } from "@/app/components/CartProvider";
+import { useCart } from "@/components/CartProvider";
 
 export default function CartPage() {
   const {
@@ -241,3 +241,4 @@ export default function CartPage() {
     </main>
   );
 }
+
