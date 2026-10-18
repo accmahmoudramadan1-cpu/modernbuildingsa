@@ -85,7 +85,7 @@ export default async function ProductPage({
               />
             </div>
 
-            <span className="text-sm sm:text-base font-black truncate">البناء الحديثة</span>
+            <span className="text-sm sm:text-base font-black truncate">مؤسسة البناء الحديث</span>
           </Link>
 
           <Link

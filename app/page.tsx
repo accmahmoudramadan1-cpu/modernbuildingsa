@@ -114,7 +114,7 @@ export default async function Home() {
             </div>
             <div className="flex flex-col min-w-0">
               <span className="text-xs sm:text-base lg:text-lg font-black leading-tight text-gray-900 truncate">
-                محل البناء الحديث
+                مؤسسة البناء الحديث
               </span>
               <span className="hidden sm:block text-[11px] font-semibold text-gray-500 tracking-wider">
                 Modern Building
