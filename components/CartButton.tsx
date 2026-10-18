@@ -9,14 +9,14 @@ export default function CartButton() {
   return (
     <Link
       href="/cart"
-      className="relative flex items-center gap-2 rounded-xl border border-black/10 bg-white px-4 py-2.5 font-bold transition hover:border-orange-500 hover:text-orange-600"
+      className="relative flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 font-bold text-gray-800 shadow-2xs transition hover:border-orange-500 hover:text-orange-600 whitespace-nowrap shrink-0"
     >
       <span className="text-xl">🛒</span>
 
-      <span>السلة</span>
+      <span className="text-sm">السلة</span>
 
       {cartCount > 0 && (
-        <span className="absolute -right-2 -top-2 flex h-6 min-w-6 items-center justify-center rounded-full bg-orange-600 px-1 text-xs font-black text-white">
+        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-orange-600 px-1.5 text-xs font-black text-white shadow-xs">
           {cartCount}
         </span>
       )}
