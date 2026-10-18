@@ -101,24 +101,20 @@ export default async function Home() {
       {/* Navbar */}
       <header className="sticky top-0 z-50 border-b border-gray-200/90 bg-white/95 backdrop-blur-md shadow-xs w-full">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 sm:px-6 lg:px-8 py-2.5 sm:py-3.5">
-          {/* Brand Logo & Name */}
-          <Link href="/" className="flex items-center gap-2 sm:gap-3 shrink min-w-0 group">
-            <div className="relative h-10 w-10 sm:h-12 sm:w-12 shrink-0 overflow-hidden rounded-xl bg-gray-50 border border-black/5 p-1">
+          {/* Brand Logo */}
+          <Link
+            href="/"
+            className="flex items-center shrink-0 group py-0.5"
+            title={settings.company_name || "مؤسسة البناء الحديث"}
+          >
+            <div className="relative h-10 sm:h-12 md:h-14 w-36 sm:w-44 md:w-52 transition group-hover:opacity-90">
               <NextImage
                 src="/logo.png"
-                alt={settings.company_name || "البناء الحديثة"}
+                alt={settings.company_name || "مؤسسة البناء الحديث"}
                 fill
-                className="object-contain p-0.5 sm:p-1 transition group-hover:scale-105"
+                className="object-contain object-right"
                 priority
               />
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-xs sm:text-base lg:text-lg font-black leading-tight text-gray-900 truncate">
-                مؤسسة البناء الحديث
-              </span>
-              <span className="hidden sm:block text-[11px] font-semibold text-gray-500 tracking-wider">
-                Modern Building
-              </span>
             </div>
           </Link>
 

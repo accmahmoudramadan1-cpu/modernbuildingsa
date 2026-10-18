@@ -74,18 +74,18 @@ export default async function ProductPage({
         <div className="mx-auto flex max-w-7xl items-center justify-between px-3 sm:px-6 lg:px-8 py-3">
           <Link
             href="/"
-            className="flex items-center gap-2 sm:gap-3 font-bold transition hover:text-orange-600 shrink min-w-0"
+            className="flex items-center shrink-0 group py-0.5"
+            title="مؤسسة البناء الحديث"
           >
-            <div className="relative h-10 w-10 sm:h-12 sm:w-12 shrink-0">
+            <div className="relative h-9 sm:h-11 md:h-12 w-32 sm:w-40 md:w-44 transition group-hover:opacity-90">
               <NextImage
                 src="/logo.png"
-                alt="البناء الحديثة"
+                alt="مؤسسة البناء الحديث"
                 fill
-                className="object-contain"
+                className="object-contain object-right"
+                priority
               />
             </div>
-
-            <span className="text-sm sm:text-base font-black truncate">مؤسسة البناء الحديث</span>
           </Link>
 
           <Link
