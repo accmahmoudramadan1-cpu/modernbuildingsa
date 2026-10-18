@@ -3,6 +3,8 @@
 
 :root {
   --font-tajawal: 'Tajawal', sans-serif;
+  --background: #f5f5f3;
+  --foreground: #171717;
 }
 
 * {
@@ -15,6 +17,8 @@ html {
 
 body {
   font-family: var(--font-tajawal);
-  background: #0a0a0a;
-  color: #ededed;
+  background: var(--background);
+  color: var(--foreground);
+  margin: 0;
+  padding: 0;
 }

@@ -17,7 +17,7 @@ export default function ProductGallery({
 }) {
   const [selectedImage, setSelectedImage] = useState(0);
 
-  if (images.length === 0) {
+  if (!images || images.length === 0) {
     return (
       <div className="relative aspect-square overflow-hidden rounded-[32px] bg-gray-200 shadow-xl">
         <div className="flex h-full items-center justify-center text-7xl">
@@ -32,7 +32,7 @@ export default function ProductGallery({
       {/* الصورة الرئيسية */}
       <div className="relative aspect-square overflow-hidden rounded-[32px] bg-gray-100 shadow-xl">
         <NextImage
-          src={images[selectedImage].image_url}
+          src={images[selectedImage]?.image_url || images[0].image_url}
           alt={productName}
           fill
           priority
@@ -69,4 +69,3 @@ export default function ProductGallery({
     </div>
   );
 }
-
