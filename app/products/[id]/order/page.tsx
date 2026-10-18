@@ -160,7 +160,7 @@ export default function OrderPage() {
   return (
     <main
       dir="rtl"
-      className="min-h-screen bg-[#f5f5f3] px-6 py-10"
+      className="min-h-screen bg-[#f5f5f3] px-4 sm:px-6 py-8 sm:py-10 w-full max-w-full overflow-x-hidden"
     >
       <div className="mx-auto max-w-5xl">
         <Link

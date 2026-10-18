@@ -67,16 +67,16 @@ export default async function ProductPage({
   return (
     <main
       dir="rtl"
-      className="min-h-screen bg-[#f5f5f3] text-[#171717]"
+      className="min-h-screen bg-[#f5f5f3] text-[#171717] w-full max-w-full overflow-x-hidden"
     >
       {/* Navbar */}
-      <header className="sticky top-0 z-50 border-b border-black/10 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+      <header className="sticky top-0 z-50 border-b border-gray-200/90 bg-white/95 backdrop-blur-md shadow-xs w-full">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-3 sm:px-6 lg:px-8 py-3">
           <Link
             href="/"
-            className="flex items-center gap-3 font-bold transition hover:text-orange-600"
+            className="flex items-center gap-2 sm:gap-3 font-bold transition hover:text-orange-600 shrink min-w-0"
           >
-            <div className="relative h-12 w-12">
+            <div className="relative h-10 w-10 sm:h-12 sm:w-12 shrink-0">
               <NextImage
                 src="/logo.png"
                 alt="البناء الحديثة"
@@ -85,12 +85,12 @@ export default async function ProductPage({
               />
             </div>
 
-            <span>البناء الحديثة</span>
+            <span className="text-sm sm:text-base font-black truncate">البناء الحديثة</span>
           </Link>
 
           <Link
             href="/#products"
-            className="rounded-full bg-black px-5 py-3 text-sm font-bold text-white transition hover:bg-orange-600"
+            className="rounded-xl bg-black px-4 py-2 sm:px-5 sm:py-2.5 text-xs sm:text-sm font-bold text-white transition hover:bg-orange-600 whitespace-nowrap shrink-0"
           >
             العودة للمنتجات
           </Link>
@@ -98,7 +98,7 @@ export default async function ProductPage({
       </header>
 
       {/* Product */}
-      <section className="mx-auto max-w-7xl px-6 py-10 md:py-16">
+      <section className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12 md:py-16 w-full">
         <div className="grid gap-10 lg:grid-cols-2">
           {/* Gallery */}
           <ProductGallery

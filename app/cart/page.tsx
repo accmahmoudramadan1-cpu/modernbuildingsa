@@ -30,21 +30,21 @@ export default function CartPage() {
 
   if (items.length === 0) {
     return (
-      <main className="min-h-screen bg-white px-6 py-16">
+      <main className="min-h-screen bg-white px-4 sm:px-6 py-12 sm:py-16 w-full max-w-full overflow-x-hidden">
         <div className="mx-auto max-w-4xl text-center">
           <div className="text-7xl">🛒</div>
 
-          <h1 className="mt-6 text-3xl font-black">
+          <h1 className="mt-6 text-2xl sm:text-3xl font-black">
             السلة فارغة
           </h1>
 
-          <p className="mt-3 text-gray-500">
+          <p className="mt-3 text-sm sm:text-base text-gray-500">
             لم تضف أي منتجات إلى السلة حتى الآن.
           </p>
 
           <Link
             href="/#products"
-            className="mt-8 inline-flex rounded-2xl bg-orange-600 px-8 py-4 font-bold text-white transition hover:bg-orange-700"
+            className="mt-8 inline-flex rounded-xl bg-orange-600 px-6 sm:px-8 py-3.5 text-sm sm:text-base font-bold text-white transition hover:bg-orange-700"
           >
             تصفح المنتجات
           </Link>
@@ -54,7 +54,7 @@ export default function CartPage() {
   }
 
   return (
-    <main className="min-h-screen bg-white px-6 py-12">
+    <main className="min-h-screen bg-white px-4 sm:px-6 py-8 sm:py-12 w-full max-w-full overflow-x-hidden">
       <div className="mx-auto max-w-6xl">
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
           <div>
