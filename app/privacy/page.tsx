@@ -89,6 +89,23 @@ export default function PrivacyPage() {
           </div>
         </div>
       </div>
+
+      {/* Footer Bottom Bar */}
+      <footer className="mt-auto border-t border-white/10 bg-[#0a0f14] py-6 px-4 sm:px-6 lg:px-8 w-full text-white">
+        <div className="mx-auto max-w-7xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs sm:text-sm text-gray-400">
+          <p>
+            © {new Date().getFullYear()} مؤسسة محل البناء الحديث للتجارة. جميع الحقوق محفوظة.
+          </p>
+          <div className="flex items-center gap-6">
+            <Link
+              href="/"
+              className="transition hover:text-white font-semibold underline underline-offset-4"
+            >
+              الرئيسية
+            </Link>
+          </div>
+        </div>
+      </footer>
     </main>
   );
 }

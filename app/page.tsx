@@ -482,11 +482,11 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Contact Section */}
-      <section id="contact" className="px-4 sm:px-6 lg:px-8 pb-12 sm:pb-20 w-full">
-        <div className="mx-auto max-w-5xl rounded-2xl sm:rounded-[36px] bg-[#123B5D] p-6 sm:p-12 md:p-14 text-center text-white shadow-xl">
-          {/* Logo instead of text */}
-          <div className="flex flex-col items-center justify-center">
+      {/* Full-width Black Footer & Contact Section */}
+      <footer id="contact" className="w-full bg-[#0a0f14] text-white border-t border-white/10">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16 lg:py-20">
+          {/* Logo & Headline */}
+          <div className="flex flex-col items-center justify-center text-center">
             <div className="relative h-16 sm:h-20 md:h-24 w-60 sm:w-72 md:w-80">
               <NextImage
                 src="/logo.png"
@@ -495,19 +495,19 @@ export default async function Home() {
                 className="object-contain"
               />
             </div>
-            <p className="mt-3 text-sm sm:text-lg text-white/90 font-bold">
+            <p className="mt-3 text-base sm:text-xl text-white font-bold">
               Modern Building
             </p>
-            <p className="mx-auto mt-2 max-w-2xl text-xs sm:text-base leading-relaxed text-white/80">
+            <p className="mx-auto mt-2 max-w-2xl text-xs sm:text-base leading-relaxed text-gray-400">
               تواصل معنا مباشرة لمعرفة تفاصيل المنتجات والأسعار وطلبات التوريد
             </p>
           </div>
 
-          {/* Action buttons */}
-          <div className="mt-6 sm:mt-8 flex flex-wrap justify-center gap-2 sm:gap-3">
+          {/* Quick Action Buttons */}
+          <div className="mt-8 flex flex-wrap justify-center gap-2.5 sm:gap-3">
             <a
               href={phoneLink}
-              className="rounded-full bg-white text-[#123B5D] px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-gray-100 whitespace-nowrap shadow-md"
+              className="rounded-full bg-white text-gray-900 px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-gray-200 whitespace-nowrap shadow-md"
             >
               📞 اتصل بنا
             </a>
@@ -521,7 +521,7 @@ export default async function Home() {
             </a>
             <a
               href={emailLink}
-              className="rounded-full border border-white/30 px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-white/10 whitespace-nowrap"
+              className="rounded-full border border-white/20 bg-white/5 px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-white/10 whitespace-nowrap"
             >
               ✉️ البريد الإلكتروني
             </a>
@@ -529,7 +529,7 @@ export default async function Home() {
               href={settings.instagram_url || "https://www.instagram.com/modern_building_1"}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-full border border-white/30 px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-white/10 whitespace-nowrap"
+              className="rounded-full border border-white/20 bg-white/5 px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-white/10 whitespace-nowrap"
             >
               📸 Instagram
             </a>
@@ -538,56 +538,57 @@ export default async function Home() {
                 href={settings.maps_url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="rounded-full border border-white/30 px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-white/10 whitespace-nowrap"
+                className="rounded-full border border-white/20 bg-white/5 px-6 sm:px-8 py-3 text-xs sm:text-sm font-bold transition hover:bg-white/10 whitespace-nowrap"
               >
                 📍 موقعنا على الخريطة
               </a>
             )}
           </div>
 
-          {/* Cards for Management & Legal details */}
-          <div className="mt-8 sm:mt-10 grid gap-4 text-xs sm:text-sm grid-cols-1 md:grid-cols-2 text-right">
+          {/* Information Cards (Full width in 2 cols) */}
+          <div className="mt-10 sm:mt-12 grid gap-6 text-xs sm:text-sm grid-cols-1 md:grid-cols-2 text-right">
             {/* Right card: Sales & Management */}
-            <div className="rounded-xl sm:rounded-2xl bg-black/20 p-5 sm:p-6 border border-white/10">
-              <p className="text-sm sm:text-base font-bold text-white border-b border-white/10 pb-2">
-                📞 المبيعات والإدارة
+            <div className="rounded-2xl bg-white/[0.04] p-6 sm:p-7 border border-white/10 backdrop-blur-sm">
+              <p className="text-base font-bold text-white border-b border-white/10 pb-3 flex items-center gap-2">
+                <span>📞</span>
+                <span>المبيعات والإدارة</span>
               </p>
-              <div className="mt-3 space-y-2.5 text-white/90 text-xs sm:text-sm">
+              <div className="mt-4 space-y-3 text-gray-300 text-xs sm:text-sm">
                 <div>
-                  <p className="font-semibold text-blue-200">مبيعات ومشتريات:</p>
-                  <div className="mt-1 flex flex-col gap-1 pr-2">
-                    <a href="tel:0558689100" className="hover:underline hover:text-white">
-                      إبراهيم: <span dir="ltr">0558689100</span>
+                  <p className="font-bold text-[#3b82f6]">مبيعات ومشتريات:</p>
+                  <div className="mt-1.5 flex flex-col gap-1 pr-2">
+                    <a href="tel:0558689100" className="hover:text-white transition">
+                      إبراهيم: <span dir="ltr" className="font-mono text-white">0558689100</span>
                     </a>
-                    <a href="tel:0501960009" className="hover:underline hover:text-white">
-                      بندر: <span dir="ltr">0501960009</span>
+                    <a href="tel:0501960009" className="hover:text-white transition">
+                      بندر: <span dir="ltr" className="font-mono text-white">0501960009</span>
                     </a>
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-white/10">
-                  <p className="font-semibold text-blue-200">المدير العام:</p>
-                  <a href="tel:0555794204" className="block mt-1 pr-2 hover:underline hover:text-white">
-                    علي يحيى: <span dir="ltr">0555794204</span>
+                <div className="pt-3 border-t border-white/10">
+                  <p className="font-bold text-[#3b82f6]">المدير العام:</p>
+                  <a href="tel:0555794204" className="block mt-1 pr-2 hover:text-white transition">
+                    علي يحيى: <span dir="ltr" className="font-mono text-white">0555794204</span>
                   </a>
                 </div>
 
-                <div className="pt-2 border-t border-white/10 space-y-1.5">
-                  <p>
-                    <span className="font-semibold text-blue-200">الهاتف الثابت:</span>{" "}
-                    <a href="tel:0175423431" className="hover:underline hover:text-white" dir="ltr">
+                <div className="pt-3 border-t border-white/10 space-y-2">
+                  <p className="flex items-center justify-between sm:justify-start sm:gap-4">
+                    <span className="font-bold text-[#3b82f6]">الهاتف الثابت:</span>{" "}
+                    <a href="tel:0175423431" className="hover:text-white transition font-mono" dir="ltr">
                       0175423431
                     </a>
                   </p>
-                  <p>
-                    <span className="font-semibold text-blue-200">الواتساب:</span>{" "}
-                    <a href="https://wa.me/966554304322" target="_blank" rel="noopener noreferrer" className="hover:underline hover:text-white" dir="ltr">
+                  <p className="flex items-center justify-between sm:justify-start sm:gap-4">
+                    <span className="font-bold text-[#3b82f6]">الواتساب:</span>{" "}
+                    <a href="https://wa.me/966554304322" target="_blank" rel="noopener noreferrer" className="hover:text-white transition font-mono" dir="ltr">
                       0554304322
                     </a>
                   </p>
-                  <p>
-                    <span className="font-semibold text-blue-200">البريد الإلكتروني:</span>{" "}
-                    <a href="mailto:Info@modernbuildingsa.com" className="hover:underline hover:text-white" dir="ltr">
+                  <p className="flex items-center justify-between sm:justify-start sm:gap-4">
+                    <span className="font-bold text-[#3b82f6]">البريد الإلكتروني:</span>{" "}
+                    <a href="mailto:Info@modernbuildingsa.com" className="hover:text-white transition font-mono" dir="ltr">
                       Info@modernbuildingsa.com
                     </a>
                   </p>
@@ -596,54 +597,55 @@ export default async function Home() {
             </div>
 
             {/* Left card: Legal & Address */}
-            <div className="rounded-xl sm:rounded-2xl bg-black/20 p-5 sm:p-6 border border-white/10">
-              <p className="text-sm sm:text-base font-bold text-white border-b border-white/10 pb-2">
-                🧾 البيانات القانونية والعنوان
+            <div className="rounded-2xl bg-white/[0.04] p-6 sm:p-7 border border-white/10 backdrop-blur-sm">
+              <p className="text-base font-bold text-white border-b border-white/10 pb-3 flex items-center gap-2">
+                <span>🧾</span>
+                <span>البيانات القانونية والعنوان</span>
               </p>
-              <div className="mt-3 space-y-2.5 text-white/90 text-xs sm:text-sm">
+              <div className="mt-4 space-y-3 text-gray-300 text-xs sm:text-sm">
                 <p>
-                  <span className="font-semibold text-blue-200">الاسم القانوني:</span> مؤسسة محل البناء الحديث للتجارة
+                  <span className="font-bold text-[#3b82f6]">الاسم القانوني:</span> مؤسسة محل البناء الحديث للتجارة
                 </p>
                 <p>
-                  <span className="font-semibold text-blue-200">السجل التجاري:</span> <span dir="ltr">5950008086</span>
+                  <span className="font-bold text-[#3b82f6]">السجل التجاري:</span> <span dir="ltr" className="font-mono text-white font-semibold">5950008086</span>
                 </p>
                 <p>
-                  <span className="font-semibold text-blue-200">الرقم الضريبي:</span> <span dir="ltr">300912409900003</span>
+                  <span className="font-bold text-[#3b82f6]">الرقم الضريبي:</span> <span dir="ltr" className="font-mono text-white font-semibold">300912409900003</span>
                 </p>
                 <p>
-                  <span className="font-semibold text-blue-200">العنوان:</span> نجران – أبا السعود – البلد (مقابل مستشفى نجران العام)
+                  <span className="font-bold text-[#3b82f6]">العنوان:</span> نجران – أبا السعود – البلد (مقابل مستشفى نجران العام)
                 </p>
                 <p>
-                  <span className="font-semibold text-blue-200">العنوان المختصر:</span> <span dir="ltr">NJSA3888</span>
+                  <span className="font-bold text-[#3b82f6]">العنوان المختصر:</span> <span dir="ltr" className="font-mono text-white font-semibold">NJSA3888</span>
                 </p>
                 <p>
-                  <span className="font-semibold text-blue-200">الرمز البريدي:</span> <span dir="ltr">66277</span>
+                  <span className="font-bold text-[#3b82f6]">الرمز البريدي:</span> <span dir="ltr" className="font-mono text-white font-semibold">66277</span>
                 </p>
               </div>
             </div>
           </div>
         </div>
-      </section>
 
-      {/* Footer Bottom Bar */}
-      <footer className="border-t border-gray-200 bg-white py-6 px-4 sm:px-6 lg:px-8 w-full">
-        <div className="mx-auto max-w-7xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs sm:text-sm text-gray-600">
-          <p>
-            © {new Date().getFullYear()} مؤسسة محل البناء الحديث للتجارة. جميع الحقوق محفوظة.
-          </p>
-          <div className="flex items-center gap-6">
-            <Link
-              href="/privacy"
-              className="transition hover:text-[#123B5D] font-semibold underline underline-offset-4"
-            >
-              سياسة الخصوصية
-            </Link>
-            <a
-              href="#home"
-              className="transition hover:text-[#123B5D]"
-            >
-              العودة للأعلى ↑
-            </a>
+        {/* Bottom Sub-Footer Bar */}
+        <div className="border-t border-white/10 bg-black/60 py-6 px-4 sm:px-6 lg:px-8 w-full">
+          <div className="mx-auto max-w-7xl flex flex-col sm:flex-row items-center justify-between gap-4 text-xs sm:text-sm text-gray-400">
+            <p>
+              © {new Date().getFullYear()} مؤسسة محل البناء الحديث للتجارة. جميع الحقوق محفوظة.
+            </p>
+            <div className="flex items-center gap-6">
+              <Link
+                href="/privacy"
+                className="transition hover:text-white font-semibold underline underline-offset-4"
+              >
+                سياسة الخصوصية
+              </Link>
+              <a
+                href="#home"
+                className="transition hover:text-white"
+              >
+                العودة للأعلى ↑
+              </a>
+            </div>
           </div>
         </div>
       </footer>
