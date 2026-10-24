@@ -648,7 +648,7 @@ export default async function Home() {
           <div className="flex flex-col items-center justify-center text-center">
             <div className="relative h-16 sm:h-20 md:h-24 w-60 sm:w-72 md:w-80">
               <NextImage
-                src="/logo.png"
+                src="/logo-white.png"
                 alt="مؤسسة محل البناء الحديث للتجارة"
                 fill
                 className="object-contain"
