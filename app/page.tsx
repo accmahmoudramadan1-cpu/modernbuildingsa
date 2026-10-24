@@ -277,7 +277,7 @@ export default async function Home() {
                   rel="noopener noreferrer"
                   className="rounded-xl bg-[#25D366] px-5 sm:px-7 py-3 text-center text-xs sm:text-sm font-bold text-white shadow-md transition hover:bg-[#1ebe5b] whitespace-nowrap"
                 >
-                  💬 للتواصل عبر الواتساب فوري
+                  💬 للتواصل عبر الواتساب
                 </a>
                 <a
                   href="#about"
