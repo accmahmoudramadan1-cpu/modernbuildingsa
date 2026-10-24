@@ -447,7 +447,7 @@ export default async function Home() {
         <div className="mx-auto max-w-7xl">
           <div className="rounded-2xl sm:rounded-[36px] bg-[#0e1e2d] p-6 sm:p-12 md:p-14 text-white">
             <h2 className="text-2xl sm:text-4xl font-black md:text-5xl">
-              شريكك الموثوق في كل خطوة بناء
+              شريكك الموثوق في كل خطوة
             </h2>
             <div className="mt-8 sm:mt-12 grid gap-4 sm:gap-8 grid-cols-1 md:grid-cols-3">
               <div className="rounded-xl sm:rounded-2xl bg-white/5 p-5 sm:p-6 border border-white/10">
