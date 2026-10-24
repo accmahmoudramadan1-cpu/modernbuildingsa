@@ -63,12 +63,17 @@ export default async function Home() {
         .maybeSingle(),
     ]);
 
-  // Standard Categories requested by Store Owner (Excluded: الأدوات الصحية و مواد الإنارة)
+  // Standard Categories requested by Store Owner (Excluded: الأدوات الصحية)
   const officialCategories: { name: string; icon: string; description: string }[] = [
     {
       name: "مواد الكهرباء",
       icon: "⚡",
       description: "أسلاك، قواطع، لوحات توزيع، مفاتيح وأفياش معتمدة بأعلى معايير الأمان.",
+    },
+    {
+      name: "مواد الإنارة",
+      icon: "💡",
+      description: "كشافات، إضاءات داخلية وخارجية، ليد، سبوتات وثريات ديكورية عصرية.",
     },
     {
       name: "مواد السباكة والتمديدات",
@@ -101,27 +106,27 @@ export default async function Home() {
     "الأدوات الصحية",
     "المواد الصحية",
     "أدوات صحية",
-    "مواد الإنارة",
-    "مواد الأنارة",
-    "الإنارة",
   ];
+
+  const normalizeArabic = (text: string) =>
+    text.trim().toLowerCase().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه");
 
   // Filter out excluded categories from database
   const dbCategories: Category[] = (categories || []).filter((c) => {
-    const trimmed = c.name.trim();
-    return !excludedCategoryNames.some(
-      (excluded) => trimmed.includes(excluded) || excluded.includes(trimmed)
-    );
+    const norm = normalizeArabic(c.name);
+    return !excludedCategoryNames.some((excluded) => {
+      const normEx = normalizeArabic(excluded);
+      return norm.includes(normEx) || normEx.includes(norm);
+    });
   });
 
   // Match DB categories to official list or generate standardized fallbacks
   const displayCategories: Category[] = officialCategories.map((official, idx) => {
-    const matched = dbCategories.find(
-      (c) =>
-        c.name.trim().toLowerCase() === official.name.trim().toLowerCase() ||
-        official.name.includes(c.name.trim()) ||
-        c.name.includes(official.name.trim())
-    );
+    const normOfficial = normalizeArabic(official.name);
+    const matched = dbCategories.find((c) => {
+      const normC = normalizeArabic(c.name);
+      return normC === normOfficial || normC.includes(normOfficial) || normOfficial.includes(normC);
+    });
 
     return {
       id: matched ? matched.id : `cat-official-${idx + 1}`,
