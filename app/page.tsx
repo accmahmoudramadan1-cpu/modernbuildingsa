@@ -63,7 +63,7 @@ export default async function Home() {
         .maybeSingle(),
     ]);
 
-  // 8 Standard Categories requested by Store Owner
+  // Standard Categories requested by Store Owner (Excluded: الأدوات الصحية و مواد الإنارة)
   const officialCategories: { name: string; icon: string; description: string }[] = [
     {
       name: "مواد الكهرباء",
@@ -71,19 +71,9 @@ export default async function Home() {
       description: "أسلاك، قواطع، لوحات توزيع، مفاتيح وأفياش معتمدة بأعلى معايير الأمان.",
     },
     {
-      name: "مواد الإنارة",
-      icon: "💡",
-      description: "كشافات، إضاءات داخلية وخارجية، ليد، سبوتات وثريات ديكورية عصرية.",
-    },
-    {
       name: "مواد السباكة والتمديدات",
       icon: "🔧",
       description: "مواسير حرارية، محابس، قطع ربط، وشبكات تغذية وصرف متينة ومضمونة.",
-    },
-    {
-      name: "الأدوات الصحية",
-      icon: "🚿",
-      description: "خلاطات، شطافات، مغاسل، كراسي ومستلزمات دورات المياه بأرقى الموديلات.",
     },
     {
       name: "مواد البناء",
@@ -107,7 +97,22 @@ export default async function Home() {
     },
   ];
 
-  const dbCategories: Category[] = categories || [];
+  const excludedCategoryNames = [
+    "الأدوات الصحية",
+    "المواد الصحية",
+    "أدوات صحية",
+    "مواد الإنارة",
+    "مواد الأنارة",
+    "الإنارة",
+  ];
+
+  // Filter out excluded categories from database
+  const dbCategories: Category[] = (categories || []).filter((c) => {
+    const trimmed = c.name.trim();
+    return !excludedCategoryNames.some(
+      (excluded) => trimmed.includes(excluded) || excluded.includes(trimmed)
+    );
+  });
 
   // Match DB categories to official list or generate standardized fallbacks
   const displayCategories: Category[] = officialCategories.map((official, idx) => {
@@ -149,7 +154,7 @@ export default async function Home() {
       siteSettings?.address ||
       "نجران – أبا السعود – البلد (مقابل مستشفى نجران العام)",
     description: siteSettings?.description || "لمواد البناء والتشطيب",
-    maps_url: siteSettings?.maps_url || null,
+    maps_url: siteSettings?.maps_url || "https://maps.app.goo.gl/VqfvbzxYBCMhGbpG8?g_st=aw",
     whatsapp_business: siteSettings?.whatsapp_business || "https://wa.me/966554304322",
     instagram_url: siteSettings?.instagram_url || "https://www.instagram.com/modern_building_1",
     email: siteSettings?.email || "Info@modernbuildingsa.com",
@@ -197,6 +202,9 @@ export default async function Home() {
             </a>
             <a href="#categories" className="transition hover:text-[#123B5D]">
               الأقسام
+            </a>
+            <a href="#location" className="transition hover:text-[#123B5D]">
+              موقعنا
             </a>
             <a href="#products" className="transition hover:text-[#123B5D]">
               المنتجات
@@ -411,6 +419,157 @@ export default async function Home() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Store Location Map Section */}
+      <section
+        id="location"
+        className="w-full bg-[#f8fafc] border-y border-gray-200/80 px-4 sm:px-6 lg:px-8 py-12 sm:py-20"
+      >
+        <div className="mx-auto max-w-7xl">
+          {/* Section Header */}
+          <div className="text-center max-w-3xl mx-auto">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#123B5D]/10 text-[#123B5D] px-4 py-1.5 text-xs sm:text-sm font-bold">
+              📍 تفضل بزيارة معرضنا
+            </span>
+            <h2 className="mt-3 text-2xl sm:text-4xl font-black text-gray-900">
+              موقع المحل على الخريطة
+            </h2>
+            <p className="mt-2 text-xs sm:text-base text-gray-600 leading-relaxed">
+              يسعدنا تشريفكم في معرضنا الرئيسي بنجران للاطلاع على أحدث مواد البناء والسباكة والكهرباء وتلبية كافة احتياجات مشروعاتكم.
+            </p>
+          </div>
+
+          {/* Interactive Card & Map Grid */}
+          <div className="mt-8 sm:mt-12 grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8 items-stretch">
+            {/* Store Info Card (5 cols on lg) */}
+            <div className="lg:col-span-5 flex flex-col justify-between rounded-3xl bg-white p-6 sm:p-8 shadow-sm border border-gray-200/90">
+              <div>
+                <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#123B5D] text-white text-2xl shadow-xs">
+                    🏬
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-gray-900">
+                      مؤسسة محل البناء الحديث للتجارة
+                    </h3>
+                    <p className="text-xs text-gray-500 font-medium">
+                      Modern Building — نجران
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-5 space-y-3.5 text-xs sm:text-sm text-gray-700">
+                  <div className="flex items-start gap-3">
+                    <span className="text-base mt-0.5">📍</span>
+                    <div>
+                      <p className="font-bold text-gray-900">العنوان:</p>
+                      <p className="text-gray-600 mt-0.5 leading-relaxed">
+                        نجران – أبا السعود – طريق الملك عبدالعزيز
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="text-base mt-0.5">🏥</span>
+                    <div>
+                      <p className="font-bold text-gray-900">علامة مميزة:</p>
+                      <p className="text-gray-600 mt-0.5 leading-relaxed">
+                        مقابل مستشفى نجران العام القديم
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="text-base mt-0.5">🏷️</span>
+                    <div>
+                      <p className="font-bold text-gray-900">العنوان الوطني والرمز البريدي:</p>
+                      <p className="text-gray-600 mt-0.5 font-mono">
+                        العنوان المختصر: <span className="font-bold text-gray-900">NJSA3888</span> (مبنى 3888) | الرمز: <span className="font-bold text-gray-900">66277</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <span className="text-base mt-0.5">⏱️</span>
+                    <div>
+                      <p className="font-bold text-gray-900">أوقات العمل:</p>
+                      <p className="text-gray-600 mt-0.5 leading-relaxed">
+                        السبت – الخميس: ٧:٠٠ ص – ١٠:٠٠ م <br />
+                        الجمعة: ٤:٠٠ م – ١٠:٠٠ م
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="mt-6 pt-5 border-t border-gray-100 flex flex-col gap-2.5">
+                <a
+                  href="https://maps.app.goo.gl/VqfvbzxYBCMhGbpG8?g_st=aw"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 rounded-xl bg-[#123B5D] px-5 py-3 text-center text-xs sm:text-sm font-bold text-white shadow-md transition hover:bg-[#0B2942]"
+                >
+                  <span>📍 فتح في تطبيق خرائط Google</span>
+                  <span dir="ltr">↗</span>
+                </a>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <a
+                    href="tel:0175423431"
+                    className="flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-center text-xs sm:text-sm font-bold text-gray-800 transition hover:bg-gray-100"
+                  >
+                    <span>📞 0175423431</span>
+                  </a>
+                  <a
+                    href={settings.whatsapp_business || whatsappLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-1.5 rounded-xl bg-[#25D366] px-3 py-2.5 text-center text-xs sm:text-sm font-bold text-white transition hover:bg-[#1ebe5b]"
+                  >
+                    <span>💬 واتساب المحل</span>
+                  </a>
+                </div>
+              </div>
+            </div>
+
+            {/* Map Frame (7 cols on lg) */}
+            <div className="lg:col-span-7 rounded-3xl overflow-hidden shadow-sm border border-gray-200/90 bg-white relative min-h-[360px] sm:min-h-[440px] flex flex-col">
+              {/* Header bar over map */}
+              <div className="flex items-center justify-between px-4 sm:px-6 py-3 bg-white border-b border-gray-100 text-xs sm:text-sm font-bold text-gray-700">
+                <div className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
+                  <span>معرض البناء الحديث (طريق الملك عبدالعزيز)</span>
+                </div>
+                <a
+                  href="https://maps.app.goo.gl/VqfvbzxYBCMhGbpG8?g_st=aw"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-[#123B5D] hover:underline flex items-center gap-1"
+                >
+                  <span>تكبير الخريطة</span>
+                  <span>↗</span>
+                </a>
+              </div>
+
+              {/* Responsive Iframe Embed */}
+              <div className="relative flex-1 w-full min-h-[320px] sm:min-h-[400px]">
+                <iframe
+                  title="موقع مؤسسة محل البناء الحديث على خرائط جوجل"
+                  src="https://maps.google.com/maps?q=%D8%A7%D9%84%D8%A8%D9%86%D8%A7%D8%A1+%D8%A7%D9%84%D8%AD%D8%AF%D9%8A%D8%AB+%D9%84%D9%84%D8%A7%D8%AF%D9%88%D8%A7%D8%AA+%D8%A7%D9%84%D8%B3%D8%A8%D8%A7%D9%83%D8%A9+%D9%88%D8%A7%D9%84%D9%83%D9%87%D8%B1%D8%A8%D8%A7%D8%A1%D8%8C+3888+%D8%B7%D8%B1%D9%8A%D9%82+%D8%A7%D9%84%D9%85%D9%84%D9%83+%D8%B9%D8%A8%D8%AF%D8%A7%D9%84%D8%B9%D8%B2%D9%8A%D8%B2%D8%8C+%D8%A7%D8%A8%D8%A7+%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D8%8C+%D9%86%D8%AC%D8%B1%D8%A7%D9%86&t=&z=16&ie=UTF8&iwloc=&output=embed"
+                  className="absolute inset-0 h-full w-full border-0"
+                  loading="lazy"
+                  allowFullScreen
+                  referrerPolicy="no-referrer-when-downgrade"
+                ></iframe>
+              </div>
+            </div>
           </div>
         </div>
       </section>
