@@ -654,10 +654,7 @@ export default async function Home() {
                 className="object-contain"
               />
             </div>
-            <p className="mt-3 text-base sm:text-xl text-white font-bold">
-              Modern Building
-            </p>
-            <p className="mx-auto mt-2 max-w-2xl text-xs sm:text-base leading-relaxed text-gray-400">
+            <p className="mx-auto mt-4 max-w-2xl text-xs sm:text-base leading-relaxed text-gray-400">
               تواصل معنا مباشرة لمعرفة تفاصيل المنتجات والأسعار وطلبات التوريد
             </p>
           </div>
