@@ -133,7 +133,7 @@ export default function ProductSearch({
                 <div className="mt-3 flex items-center justify-between gap-2 border-t border-black/5 pt-3">
                   <div>
                     {product.show_price && product.price !== null ? (
-                      <span className="text-sm sm:text-base font-black text-orange-600">
+                      <span className="text-sm sm:text-base font-black text-[#123B5D]">
                         {product.price} {product.currency || "ر.س"}
                       </span>
                     ) : (
@@ -143,8 +143,9 @@ export default function ProductSearch({
                     )}
                   </div>
 
-                  <span className="flex h-9 w-9 sm:h-10 sm:w-10 shrink-0 items-center justify-center rounded-full bg-black text-lg text-white transition group-hover:bg-orange-600">
-                    +
+                  <span className="inline-flex items-center gap-1 rounded-xl bg-[#123B5D] px-3.5 py-1.5 text-xs font-bold text-white transition group-hover:bg-[#0B2942]">
+                    <span>معاينة</span>
+                    <span>←</span>
                   </span>
                 </div>
               </div>

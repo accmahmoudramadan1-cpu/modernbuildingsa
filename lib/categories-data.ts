@@ -1,0 +1,726 @@
+// Auto-generated categories & gallery catalog data
+export type CategoryItem = {
+  id: string;
+  title: string;
+  src: string;
+};
+
+export type StoreCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string;
+  description: string;
+  thumbnail: string;
+  folder: string;
+  default_item_name: string;
+  images_count: number;
+  images: CategoryItem[];
+};
+
+export const STORE_CATEGORIES: StoreCategory[] = [
+  {
+    "id": "cat-electrical",
+    "slug": "electrical",
+    "name": "مواد الكهرباء",
+    "icon": "⚡",
+    "description": "أسلاك، قواطع، لوحات توزيع، مفاتيح وأفياش معتمدة بأعلى معايير الأمان والجودة لمختلف المنشآت.",
+    "thumbnail": "/thumbnails/electrical.jpg",
+    "folder": "electrical",
+    "default_item_name": "مستلزمات وتمديدات كهربائية معتمدة",
+    "images_count": 4,
+    "images": [
+      {
+        "id": "electrical-1",
+        "title": "مستلزمات وتمديدات كهربائية معتمدة #1",
+        "src": "/gallery/electrical/elec_1.jpg"
+      },
+      {
+        "id": "electrical-2",
+        "title": "مستلزمات وتمديدات كهربائية معتمدة #2",
+        "src": "/gallery/electrical/elec_2.jpg"
+      },
+      {
+        "id": "electrical-3",
+        "title": "مستلزمات وتمديدات كهربائية معتمدة #3",
+        "src": "/gallery/electrical/elec_3.jpg"
+      },
+      {
+        "id": "electrical-4",
+        "title": "مستلزمات وتمديدات كهربائية معتمدة #4",
+        "src": "/gallery/electrical/elec_5.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cat-lighting",
+    "slug": "lighting",
+    "name": "مواد الإنارة",
+    "icon": "💡",
+    "description": "كشافات، إضاءات داخلية وخارجية، ليد، سبوتات وثريات ديكورية عصرية تناسب المنازل والمشاريع.",
+    "thumbnail": "/thumbnails/lighting.jpg",
+    "folder": "lighting",
+    "default_item_name": "وحدات وكشافات إنارة حديثة",
+    "images_count": 48,
+    "images": [
+      {
+        "id": "lighting-1",
+        "title": "وحدات وكشافات إنارة حديثة #1",
+        "src": "/gallery/lighting/21.jpg"
+      },
+      {
+        "id": "lighting-2",
+        "title": "وحدات وكشافات إنارة حديثة #2",
+        "src": "/gallery/lighting/210.jpg"
+      },
+      {
+        "id": "lighting-3",
+        "title": "وحدات وكشافات إنارة حديثة #3",
+        "src": "/gallery/lighting/211.jpg"
+      },
+      {
+        "id": "lighting-4",
+        "title": "وحدات وكشافات إنارة حديثة #4",
+        "src": "/gallery/lighting/212.jpg"
+      },
+      {
+        "id": "lighting-5",
+        "title": "وحدات وكشافات إنارة حديثة #5",
+        "src": "/gallery/lighting/213.jpg"
+      },
+      {
+        "id": "lighting-6",
+        "title": "وحدات وكشافات إنارة حديثة #6",
+        "src": "/gallery/lighting/214.jpg"
+      },
+      {
+        "id": "lighting-7",
+        "title": "وحدات وكشافات إنارة حديثة #7",
+        "src": "/gallery/lighting/215.jpg"
+      },
+      {
+        "id": "lighting-8",
+        "title": "وحدات وكشافات إنارة حديثة #8",
+        "src": "/gallery/lighting/216.jpg"
+      },
+      {
+        "id": "lighting-9",
+        "title": "وحدات وكشافات إنارة حديثة #9",
+        "src": "/gallery/lighting/217.jpg"
+      },
+      {
+        "id": "lighting-10",
+        "title": "وحدات وكشافات إنارة حديثة #10",
+        "src": "/gallery/lighting/218.jpg"
+      },
+      {
+        "id": "lighting-11",
+        "title": "وحدات وكشافات إنارة حديثة #11",
+        "src": "/gallery/lighting/219.jpg"
+      },
+      {
+        "id": "lighting-12",
+        "title": "وحدات وكشافات إنارة حديثة #12",
+        "src": "/gallery/lighting/22.jpg"
+      },
+      {
+        "id": "lighting-13",
+        "title": "وحدات وكشافات إنارة حديثة #13",
+        "src": "/gallery/lighting/220.jpg"
+      },
+      {
+        "id": "lighting-14",
+        "title": "وحدات وكشافات إنارة حديثة #14",
+        "src": "/gallery/lighting/221.jpg"
+      },
+      {
+        "id": "lighting-15",
+        "title": "وحدات وكشافات إنارة حديثة #15",
+        "src": "/gallery/lighting/222.jpg"
+      },
+      {
+        "id": "lighting-16",
+        "title": "وحدات وكشافات إنارة حديثة #16",
+        "src": "/gallery/lighting/223.jpg"
+      },
+      {
+        "id": "lighting-17",
+        "title": "وحدات وكشافات إنارة حديثة #17",
+        "src": "/gallery/lighting/224.jpg"
+      },
+      {
+        "id": "lighting-18",
+        "title": "وحدات وكشافات إنارة حديثة #18",
+        "src": "/gallery/lighting/225.jpg"
+      },
+      {
+        "id": "lighting-19",
+        "title": "وحدات وكشافات إنارة حديثة #19",
+        "src": "/gallery/lighting/226.jpg"
+      },
+      {
+        "id": "lighting-20",
+        "title": "وحدات وكشافات إنارة حديثة #20",
+        "src": "/gallery/lighting/227.jpg"
+      },
+      {
+        "id": "lighting-21",
+        "title": "وحدات وكشافات إنارة حديثة #21",
+        "src": "/gallery/lighting/228.jpg"
+      },
+      {
+        "id": "lighting-22",
+        "title": "وحدات وكشافات إنارة حديثة #22",
+        "src": "/gallery/lighting/229.jpg"
+      },
+      {
+        "id": "lighting-23",
+        "title": "وحدات وكشافات إنارة حديثة #23",
+        "src": "/gallery/lighting/23.jpg"
+      },
+      {
+        "id": "lighting-24",
+        "title": "وحدات وكشافات إنارة حديثة #24",
+        "src": "/gallery/lighting/230.jpg"
+      },
+      {
+        "id": "lighting-25",
+        "title": "وحدات وكشافات إنارة حديثة #25",
+        "src": "/gallery/lighting/231.jpg"
+      },
+      {
+        "id": "lighting-26",
+        "title": "وحدات وكشافات إنارة حديثة #26",
+        "src": "/gallery/lighting/232.jpg"
+      },
+      {
+        "id": "lighting-27",
+        "title": "وحدات وكشافات إنارة حديثة #27",
+        "src": "/gallery/lighting/233.jpg"
+      },
+      {
+        "id": "lighting-28",
+        "title": "وحدات وكشافات إنارة حديثة #28",
+        "src": "/gallery/lighting/234.jpg"
+      },
+      {
+        "id": "lighting-29",
+        "title": "وحدات وكشافات إنارة حديثة #29",
+        "src": "/gallery/lighting/235.jpg"
+      },
+      {
+        "id": "lighting-30",
+        "title": "وحدات وكشافات إنارة حديثة #30",
+        "src": "/gallery/lighting/236.jpg"
+      },
+      {
+        "id": "lighting-31",
+        "title": "وحدات وكشافات إنارة حديثة #31",
+        "src": "/gallery/lighting/237.jpg"
+      },
+      {
+        "id": "lighting-32",
+        "title": "وحدات وكشافات إنارة حديثة #32",
+        "src": "/gallery/lighting/238.jpg"
+      },
+      {
+        "id": "lighting-33",
+        "title": "وحدات وكشافات إنارة حديثة #33",
+        "src": "/gallery/lighting/239.jpg"
+      },
+      {
+        "id": "lighting-34",
+        "title": "وحدات وكشافات إنارة حديثة #34",
+        "src": "/gallery/lighting/24.jpg"
+      },
+      {
+        "id": "lighting-35",
+        "title": "وحدات وكشافات إنارة حديثة #35",
+        "src": "/gallery/lighting/240.jpg"
+      },
+      {
+        "id": "lighting-36",
+        "title": "وحدات وكشافات إنارة حديثة #36",
+        "src": "/gallery/lighting/241.jpg"
+      },
+      {
+        "id": "lighting-37",
+        "title": "وحدات وكشافات إنارة حديثة #37",
+        "src": "/gallery/lighting/242.jpg"
+      },
+      {
+        "id": "lighting-38",
+        "title": "وحدات وكشافات إنارة حديثة #38",
+        "src": "/gallery/lighting/243.jpg"
+      },
+      {
+        "id": "lighting-39",
+        "title": "وحدات وكشافات إنارة حديثة #39",
+        "src": "/gallery/lighting/244.jpg"
+      },
+      {
+        "id": "lighting-40",
+        "title": "وحدات وكشافات إنارة حديثة #40",
+        "src": "/gallery/lighting/245.jpg"
+      },
+      {
+        "id": "lighting-41",
+        "title": "وحدات وكشافات إنارة حديثة #41",
+        "src": "/gallery/lighting/246.jpg"
+      },
+      {
+        "id": "lighting-42",
+        "title": "وحدات وكشافات إنارة حديثة #42",
+        "src": "/gallery/lighting/247.jpg"
+      },
+      {
+        "id": "lighting-43",
+        "title": "وحدات وكشافات إنارة حديثة #43",
+        "src": "/gallery/lighting/25.jpg"
+      },
+      {
+        "id": "lighting-44",
+        "title": "وحدات وكشافات إنارة حديثة #44",
+        "src": "/gallery/lighting/26.jpg"
+      },
+      {
+        "id": "lighting-45",
+        "title": "وحدات وكشافات إنارة حديثة #45",
+        "src": "/gallery/lighting/27.jpg"
+      },
+      {
+        "id": "lighting-46",
+        "title": "وحدات وكشافات إنارة حديثة #46",
+        "src": "/gallery/lighting/28.jpg"
+      },
+      {
+        "id": "lighting-47",
+        "title": "وحدات وكشافات إنارة حديثة #47",
+        "src": "/gallery/lighting/29.jpg"
+      },
+      {
+        "id": "lighting-48",
+        "title": "وحدات وكشافات إنارة حديثة #48",
+        "src": "/gallery/lighting/626859419_18138620251491967_1128490344157023056_n.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cat-plumbing",
+    "slug": "plumbing",
+    "name": "مواد السباكة والتمديدات",
+    "icon": "🔧",
+    "description": "مواسير حرارية، محابس، قطع ربط، وشبكات تغذية وصرف متينة ومضمونة للمباني والفلل.",
+    "thumbnail": "/thumbnails/plumbing.jpg",
+    "folder": "plumbing",
+    "default_item_name": "أطقم ومواسير سباكة وشبكات مياه",
+    "images_count": 39,
+    "images": [
+      {
+        "id": "plumbing-1",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #1",
+        "src": "/gallery/plumbing/11.jpg"
+      },
+      {
+        "id": "plumbing-2",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #2",
+        "src": "/gallery/plumbing/12.jpg"
+      },
+      {
+        "id": "plumbing-3",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #3",
+        "src": "/gallery/plumbing/120.jpg"
+      },
+      {
+        "id": "plumbing-4",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #4",
+        "src": "/gallery/plumbing/121.jpg"
+      },
+      {
+        "id": "plumbing-5",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #5",
+        "src": "/gallery/plumbing/122.jpg"
+      },
+      {
+        "id": "plumbing-6",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #6",
+        "src": "/gallery/plumbing/123.jpg"
+      },
+      {
+        "id": "plumbing-7",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #7",
+        "src": "/gallery/plumbing/124.jpg"
+      },
+      {
+        "id": "plumbing-8",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #8",
+        "src": "/gallery/plumbing/125.jpg"
+      },
+      {
+        "id": "plumbing-9",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #9",
+        "src": "/gallery/plumbing/126.jpg"
+      },
+      {
+        "id": "plumbing-10",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #10",
+        "src": "/gallery/plumbing/127.jpg"
+      },
+      {
+        "id": "plumbing-11",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #11",
+        "src": "/gallery/plumbing/128.jpg"
+      },
+      {
+        "id": "plumbing-12",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #12",
+        "src": "/gallery/plumbing/129.jpg"
+      },
+      {
+        "id": "plumbing-13",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #13",
+        "src": "/gallery/plumbing/13.jpg"
+      },
+      {
+        "id": "plumbing-14",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #14",
+        "src": "/gallery/plumbing/130.jpg"
+      },
+      {
+        "id": "plumbing-15",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #15",
+        "src": "/gallery/plumbing/131.jpg"
+      },
+      {
+        "id": "plumbing-16",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #16",
+        "src": "/gallery/plumbing/132.jpg"
+      },
+      {
+        "id": "plumbing-17",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #17",
+        "src": "/gallery/plumbing/133.jpg"
+      },
+      {
+        "id": "plumbing-18",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #18",
+        "src": "/gallery/plumbing/134.jpg"
+      },
+      {
+        "id": "plumbing-19",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #19",
+        "src": "/gallery/plumbing/135.jpg"
+      },
+      {
+        "id": "plumbing-20",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #20",
+        "src": "/gallery/plumbing/136.jpg"
+      },
+      {
+        "id": "plumbing-21",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #21",
+        "src": "/gallery/plumbing/137.jpg"
+      },
+      {
+        "id": "plumbing-22",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #22",
+        "src": "/gallery/plumbing/138.jpg"
+      },
+      {
+        "id": "plumbing-23",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #23",
+        "src": "/gallery/plumbing/139.jpg"
+      },
+      {
+        "id": "plumbing-24",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #24",
+        "src": "/gallery/plumbing/14.jpg"
+      },
+      {
+        "id": "plumbing-25",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #25",
+        "src": "/gallery/plumbing/140.jpg"
+      },
+      {
+        "id": "plumbing-26",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #26",
+        "src": "/gallery/plumbing/141.jpg"
+      },
+      {
+        "id": "plumbing-27",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #27",
+        "src": "/gallery/plumbing/142.jpg"
+      },
+      {
+        "id": "plumbing-28",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #28",
+        "src": "/gallery/plumbing/143.jpg"
+      },
+      {
+        "id": "plumbing-29",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #29",
+        "src": "/gallery/plumbing/144.jpg"
+      },
+      {
+        "id": "plumbing-30",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #30",
+        "src": "/gallery/plumbing/145.jpg"
+      },
+      {
+        "id": "plumbing-31",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #31",
+        "src": "/gallery/plumbing/146.jpg"
+      },
+      {
+        "id": "plumbing-32",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #32",
+        "src": "/gallery/plumbing/147.jpg"
+      },
+      {
+        "id": "plumbing-33",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #33",
+        "src": "/gallery/plumbing/148.jpg"
+      },
+      {
+        "id": "plumbing-34",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #34",
+        "src": "/gallery/plumbing/149.jpg"
+      },
+      {
+        "id": "plumbing-35",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #35",
+        "src": "/gallery/plumbing/15.jpg"
+      },
+      {
+        "id": "plumbing-36",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #36",
+        "src": "/gallery/plumbing/16.jpg"
+      },
+      {
+        "id": "plumbing-37",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #37",
+        "src": "/gallery/plumbing/17.jpg"
+      },
+      {
+        "id": "plumbing-38",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #38",
+        "src": "/gallery/plumbing/18.jpg"
+      },
+      {
+        "id": "plumbing-39",
+        "title": "أطقم ومواسير سباكة وشبكات مياه #39",
+        "src": "/gallery/plumbing/19.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cat-sanitary",
+    "slug": "sanitary",
+    "name": "المواد والأدوات الصحية",
+    "icon": "🚿",
+    "description": "خلاطات مياه، شطافات، أطقم مغاسل، كراسي، ومستلزمات دورات المياه بأرقى الموديلات والتصاميم.",
+    "thumbnail": "/thumbnails/sanitary.jpg",
+    "folder": "sanitary",
+    "default_item_name": "أطقم وخلاطات أدوات صحية",
+    "images_count": 4,
+    "images": [
+      {
+        "id": "sanitary-1",
+        "title": "أطقم وخلاطات أدوات صحية #1",
+        "src": "/gallery/sanitary/31.jpg"
+      },
+      {
+        "id": "sanitary-2",
+        "title": "أطقم وخلاطات أدوات صحية #2",
+        "src": "/gallery/sanitary/sanitary_2.jpg"
+      },
+      {
+        "id": "sanitary-3",
+        "title": "أطقم وخلاطات أدوات صحية #3",
+        "src": "/gallery/sanitary/sanitary_3.jpg"
+      },
+      {
+        "id": "sanitary-4",
+        "title": "أطقم وخلاطات أدوات صحية #4",
+        "src": "/gallery/sanitary/sanitary_4.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cat-building",
+    "slug": "building",
+    "name": "مواد البناء",
+    "icon": "🏗️",
+    "description": "إسمنت، عوازل مائية وحرارية، لواصق وترويبات سيراميك عالية الالتصاق للمشروعات السكنية والتجارية.",
+    "thumbnail": "/thumbnails/building.jpg",
+    "folder": "building",
+    "default_item_name": "منتجات ومواد بناء وعوازل معتمدة",
+    "images_count": 6,
+    "images": [
+      {
+        "id": "building-1",
+        "title": "منتجات ومواد بناء وعوازل معتمدة #1",
+        "src": "/gallery/building/41.jpg"
+      },
+      {
+        "id": "building-2",
+        "title": "منتجات ومواد بناء وعوازل معتمدة #2",
+        "src": "/gallery/building/42.jpg"
+      },
+      {
+        "id": "building-3",
+        "title": "منتجات ومواد بناء وعوازل معتمدة #3",
+        "src": "/gallery/building/43.jpg"
+      },
+      {
+        "id": "building-4",
+        "title": "منتجات ومواد بناء وعوازل معتمدة #4",
+        "src": "/gallery/building/44.jpg"
+      },
+      {
+        "id": "building-5",
+        "title": "منتجات ومواد بناء وعوازل معتمدة #5",
+        "src": "/gallery/building/45.jpg"
+      },
+      {
+        "id": "building-6",
+        "title": "منتجات ومواد بناء وعوازل معتمدة #6",
+        "src": "/gallery/building/46.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cat-paints",
+    "slug": "paints",
+    "name": "مواد الدهانات",
+    "icon": "🎨",
+    "description": "دهانات داخلية وخارجية، معاجين، عوازل وأساسات بجودة وثبات ألوان عالي ومقاوم للعوامل الجوية.",
+    "thumbnail": "/thumbnails/paints.jpg",
+    "folder": "paints",
+    "default_item_name": "دهانات وأساسات تشطيب جدارية",
+    "images_count": 2,
+    "images": [
+      {
+        "id": "paints-1",
+        "title": "دهانات وأساسات تشطيب جدارية #1",
+        "src": "/gallery/paints/paint_1.jpg"
+      },
+      {
+        "id": "paints-2",
+        "title": "دهانات وأساسات تشطيب جدارية #2",
+        "src": "/gallery/paints/paint_3.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cat-safety",
+    "slug": "safety",
+    "name": "أدوات السلامة",
+    "icon": "🦺",
+    "description": "خوذات، أحذية سلامة، قفازات، سترات عاكسة ومعدات وقاية للمواقع الإنشائية والمهندسين والعمال.",
+    "thumbnail": "/thumbnails/safety.jpg",
+    "folder": "safety",
+    "default_item_name": "معدات وتجهيزات سلامة مهنية",
+    "images_count": 6,
+    "images": [
+      {
+        "id": "safety-1",
+        "title": "معدات وتجهيزات سلامة مهنية #1",
+        "src": "/gallery/safety/safety_1.jpg"
+      },
+      {
+        "id": "safety-2",
+        "title": "معدات وتجهيزات سلامة مهنية #2",
+        "src": "/gallery/safety/safety_2.jpg"
+      },
+      {
+        "id": "safety-3",
+        "title": "معدات وتجهيزات سلامة مهنية #3",
+        "src": "/gallery/safety/safety_3.jpg"
+      },
+      {
+        "id": "safety-4",
+        "title": "معدات وتجهيزات سلامة مهنية #4",
+        "src": "/gallery/safety/safety_4.jpg"
+      },
+      {
+        "id": "safety-5",
+        "title": "معدات وتجهيزات سلامة مهنية #5",
+        "src": "/gallery/safety/safety_5.jpg"
+      },
+      {
+        "id": "safety-6",
+        "title": "معدات وتجهيزات سلامة مهنية #6",
+        "src": "/gallery/safety/safety_6.jpg"
+      }
+    ]
+  },
+  {
+    "id": "cat-tools",
+    "slug": "tools",
+    "name": "عدد وأدوات",
+    "icon": "🛠️",
+    "description": "عدد يدوية وكهربائية، دريلات، مفكات، مسامير، أدوات قياس وقطع احترافية ومعدات فنية متكاملة.",
+    "thumbnail": "/thumbnails/tools.jpg",
+    "folder": "tools",
+    "default_item_name": "عدد يدوية وكهربائية احترافية",
+    "images_count": 9,
+    "images": [
+      {
+        "id": "tools-1",
+        "title": "عدد يدوية وكهربائية احترافية #1",
+        "src": "/gallery/tools/51.jpg"
+      },
+      {
+        "id": "tools-2",
+        "title": "عدد يدوية وكهربائية احترافية #2",
+        "src": "/gallery/tools/52.jpg"
+      },
+      {
+        "id": "tools-3",
+        "title": "عدد يدوية وكهربائية احترافية #3",
+        "src": "/gallery/tools/53.jpg"
+      },
+      {
+        "id": "tools-4",
+        "title": "عدد يدوية وكهربائية احترافية #4",
+        "src": "/gallery/tools/55.jpg"
+      },
+      {
+        "id": "tools-5",
+        "title": "عدد يدوية وكهربائية احترافية #5",
+        "src": "/gallery/tools/tools_ext_1.jpg"
+      },
+      {
+        "id": "tools-6",
+        "title": "عدد يدوية وكهربائية احترافية #6",
+        "src": "/gallery/tools/tools_ext_2.jpg"
+      },
+      {
+        "id": "tools-7",
+        "title": "عدد يدوية وكهربائية احترافية #7",
+        "src": "/gallery/tools/tools_ext_3.jpg"
+      },
+      {
+        "id": "tools-8",
+        "title": "عدد يدوية وكهربائية احترافية #8",
+        "src": "/gallery/tools/tools_ext_4.jpg"
+      },
+      {
+        "id": "tools-9",
+        "title": "عدد يدوية وكهربائية احترافية #9",
+        "src": "/gallery/tools/tools_ext_5.jpg"
+      }
+    ]
+  }
+];
+
+export function getCategoryBySlug(slug: string): StoreCategory | undefined {
+  const cleanSlug = decodeURIComponent(slug).trim().toLowerCase();
+  return STORE_CATEGORIES.find(
+    (c) =>
+      c.slug.toLowerCase() === cleanSlug ||
+      c.id.toLowerCase() === cleanSlug ||
+      c.name.trim().toLowerCase() === cleanSlug
+  );
+}

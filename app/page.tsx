@@ -1,7 +1,7 @@
 import NextImage from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-server";
-import CartButton from "@/components/CartButton";
+import { STORE_CATEGORIES } from "@/lib/categories-data";
 import ProductSearch from "@/components/ProductSearch";
 
 type Category = {
@@ -63,93 +63,24 @@ export default async function Home() {
         .maybeSingle(),
     ]);
 
-  // Standard Categories requested by Store Owner (Excluded: الأدوات الصحية)
-  const officialCategories: { name: string; icon: string; description: string }[] = [
-    {
-      name: "مواد الكهرباء",
-      icon: "⚡",
-      description: "أسلاك، قواطع، لوحات توزيع، مفاتيح وأفياش معتمدة بأعلى معايير الأمان.",
-    },
-    {
-      name: "مواد الإنارة",
-      icon: "💡",
-      description: "كشافات، إضاءات داخلية وخارجية، ليد، سبوتات وثريات ديكورية عصرية.",
-    },
-    {
-      name: "مواد السباكة والتمديدات",
-      icon: "🔧",
-      description: "مواسير حرارية، محابس، قطع ربط، وشبكات تغذية وصرف متينة ومضمونة.",
-    },
-    {
-      name: "مواد البناء",
-      icon: "🏗️",
-      description: "إسمنت، عوازل مائية وحرارية، لواصق وترويبات سيراميك عالية الالتصاق.",
-    },
-    {
-      name: "مواد الدهانات",
-      icon: "🎨",
-      description: "دهانات داخلية وخارجية، معاجين، عوازل وأساسات بجودة وثبات ألوان عالي.",
-    },
-    {
-      name: "أدوات السلامة",
-      icon: "🦺",
-      description: "خوذات، أحذية سلامة، قفازات، سترات عاكسة ومعدات وقاية للمواقع الإنشائية.",
-    },
-    {
-      name: "عدد وأدوات",
-      icon: "🛠️",
-      description: "عدد يدوية، مفكات، مفاتيح، مسامير، وأدوات قياس وقطع دقيقة.",
-    },
-    {
-      name: "عدد وآلات",
-      icon: "⚙️",
-      description: "معدات وماكينات كهربائية، دريلات، صواريخ، وأجهزة قطع ولحام صناعية.",
-    },
-  ];
-
-  const excludedCategoryNames = [
-    "الأدوات الصحية",
-    "المواد الصحية",
-    "أدوات صحية",
-  ];
-
-  const normalizeArabic = (text: string) =>
-    text.trim().toLowerCase().replace(/[أإآ]/g, "ا").replace(/ة/g, "ه");
-
-  // Filter out excluded categories from database
-  const dbCategories: Category[] = (categories || []).filter((c) => {
-    const norm = normalizeArabic(c.name);
-    return !excludedCategoryNames.some((excluded) => {
-      const normEx = normalizeArabic(excluded);
-      return norm.includes(normEx) || normEx.includes(norm);
-    });
-  });
-
-  // Match DB categories to official list or generate standardized fallbacks
-  const displayCategories: Category[] = officialCategories.map((official, idx) => {
-    const normOfficial = normalizeArabic(official.name);
-    const matched = dbCategories.find((c) => {
-      const normC = normalizeArabic(c.name);
-      return normC === normOfficial || normC.includes(normOfficial) || normOfficial.includes(normC);
+  // Display Categories using curated categories catalog (Excluded: عدد وآلات)
+  const displayCategories = STORE_CATEGORIES.map((storeCat) => {
+    const matchedDb = (categories || []).find((c) => {
+      const n1 = c.name.trim().toLowerCase();
+      const n2 = storeCat.name.trim().toLowerCase();
+      return n1 === n2 || n1.includes(n2) || n2.includes(n1);
     });
 
     return {
-      id: matched ? matched.id : `cat-official-${idx + 1}`,
-      name: official.name,
-      description: matched?.description || official.description,
-      image_url: matched?.image_url || null,
-      icon: official.icon,
+      id: matchedDb ? matchedDb.id : storeCat.id,
+      slug: storeCat.slug,
+      name: storeCat.name,
+      description: storeCat.description,
+      image_url: matchedDb?.image_url || storeCat.thumbnail,
+      thumbnail: storeCat.thumbnail,
+      icon: storeCat.icon,
+      images_count: storeCat.images_count,
     };
-  });
-
-  // Append any extra unique DB categories
-  dbCategories.forEach((dbCat) => {
-    const alreadyIncluded = displayCategories.some(
-      (c) => c.name.trim() === dbCat.name.trim() || c.id === dbCat.id
-    );
-    if (!alreadyIncluded) {
-      displayCategories.push(dbCat);
-    }
   });
 
   const safeProducts: Product[] = products || [];
@@ -227,9 +158,18 @@ export default async function Home() {
             </a>
           </nav>
 
-          {/* Action buttons (Left side in RTL) */}
+          {/* Action buttons (Left side in RTL) - Display/Contact only (No Cart) */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <CartButton />
+            {/* Quick WhatsApp on mobile */}
+            <a
+              href={settings.whatsapp_business || whatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="sm:hidden flex h-10 w-10 items-center justify-center rounded-xl bg-[#25D366] text-white shadow-xs"
+              title="واتساب"
+            >
+              💬
+            </a>
 
             {/* Quick Call icon on small mobile */}
             <a
@@ -240,7 +180,18 @@ export default async function Home() {
               📞
             </a>
 
-            {/* Full button on sm and up */}
+            {/* Full WhatsApp on sm and up */}
+            <a
+              href={settings.whatsapp_business || whatsappLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="hidden sm:inline-flex items-center gap-1.5 whitespace-nowrap rounded-xl bg-[#25D366] px-3.5 py-2 sm:px-4 sm:py-2.5 text-xs sm:text-sm font-bold text-white shadow-xs transition hover:bg-[#1ebe5b]"
+            >
+              <span>💬</span>
+              <span>واتساب المعرض</span>
+            </a>
+
+            {/* Full Contact button on sm and up */}
             <a
               href="#contact"
               className="hidden sm:inline-flex whitespace-nowrap rounded-xl bg-[#123B5D] px-4 py-2 sm:px-5 sm:py-2.5 text-xs sm:text-sm font-bold text-white shadow-xs transition hover:bg-[#0B2942]"
@@ -332,41 +283,41 @@ export default async function Home() {
             <div className="lg:col-span-5 w-full">
               <div className="rounded-2xl sm:rounded-[32px] border border-white/10 bg-white/5 p-4 sm:p-7 backdrop-blur-md">
                 <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                  <a
-                    href="#categories"
+                  <Link
+                    href="/category/lighting"
                     className="group rounded-xl sm:rounded-2xl bg-white/10 hover:bg-white/15 p-3.5 sm:p-5 border border-white/10 transition hover:-translate-y-1 block cursor-pointer"
                   >
                     <div className="text-2xl sm:text-3xl transition group-hover:scale-110">💡</div>
                     <h3 className="mt-2 text-sm sm:text-lg font-black text-white">كهرباء وإنارة</h3>
                     <p className="mt-0.5 text-[11px] sm:text-xs text-gray-300">إضاءة وأفياش ومفاتيح</p>
-                  </a>
+                  </Link>
 
-                  <a
-                    href="#categories"
+                  <Link
+                    href="/category/plumbing"
                     className="group rounded-xl sm:rounded-2xl bg-white/10 hover:bg-white/15 p-3.5 sm:p-5 border border-white/10 transition hover:-translate-y-1 block cursor-pointer"
                   >
                     <div className="text-2xl sm:text-3xl transition group-hover:scale-110">🚿</div>
                     <h3 className="mt-2 text-sm sm:text-lg font-black text-white">سباكة وأدوات صحية</h3>
                     <p className="mt-0.5 text-[11px] sm:text-xs text-gray-300">أطقم وتمديدات وشبكات</p>
-                  </a>
+                  </Link>
 
-                  <a
-                    href="#categories"
+                  <Link
+                    href="/category/building"
                     className="group rounded-xl sm:rounded-2xl bg-white/10 hover:bg-white/15 p-3.5 sm:p-5 border border-white/10 transition hover:-translate-y-1 block cursor-pointer"
                   >
                     <div className="text-2xl sm:text-3xl transition group-hover:scale-110">🧱</div>
                     <h3 className="mt-2 text-sm sm:text-lg font-black text-white">مواد بناء ودهانات</h3>
                     <p className="mt-0.5 text-[11px] sm:text-xs text-gray-300">أساسات وتشطيب متكامل</p>
-                  </a>
+                  </Link>
 
-                  <a
-                    href="#categories"
+                  <Link
+                    href="/category/tools"
                     className="group rounded-xl sm:rounded-2xl bg-white/10 hover:bg-white/15 p-3.5 sm:p-5 border border-white/10 transition hover:-translate-y-1 block cursor-pointer"
                   >
                     <div className="text-2xl sm:text-3xl transition group-hover:scale-110">🛠️</div>
                     <h3 className="mt-2 text-sm sm:text-lg font-black text-white">عدد وأدوات</h3>
                     <p className="mt-0.5 text-[11px] sm:text-xs text-gray-300">معدات ومستلزمات مهنية</p>
-                  </a>
+                  </Link>
                 </div>
               </div>
             </div>
@@ -391,43 +342,52 @@ export default async function Home() {
 
           <div className="mt-8 sm:mt-12 grid gap-4 sm:gap-6 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
             {displayCategories.map((category) => (
-              <div
+              <Link
                 key={category.id}
-                className="group overflow-hidden rounded-2xl sm:rounded-3xl border border-black/5 bg-white shadow-xs transition hover:-translate-y-1 hover:shadow-xl flex flex-col justify-between"
+                href={`/category/${category.slug || "tools"}`}
+                className="group overflow-hidden rounded-2xl sm:rounded-3xl border border-black/5 bg-white shadow-xs transition duration-300 hover:-translate-y-1.5 hover:shadow-xl flex flex-col justify-between cursor-pointer"
+                title={`تصفح معروضات قسم ${category.name}`}
               >
-                <div className="relative h-44 sm:h-52 overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
-                  {category.image_url ? (
-                    <img
-                      src={category.image_url}
-                      alt={category.name}
-                      className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-5xl sm:text-6xl transition duration-500 group-hover:scale-110 select-none">
-                      {category.icon || "🧱"}
-                    </div>
-                  )}
+                <div className="relative h-48 sm:h-56 overflow-hidden bg-gradient-to-br from-slate-100 to-slate-200">
+                  <img
+                    src={category.image_url || category.thumbnail || "/thumbnails/tools.jpg"}
+                    alt={category.name}
+                    className="h-full w-full object-cover transition duration-500 group-hover:scale-110"
+                    loading="lazy"
+                  />
+                  {category.images_count ? (
+                    <span className="absolute top-3 right-3 rounded-lg bg-black/60 text-white px-2.5 py-1 text-[11px] font-bold backdrop-blur-sm">
+                      {category.images_count} صورة
+                    </span>
+                  ) : null}
                 </div>
                 <div className="p-4 sm:p-6 flex flex-col flex-1 justify-between">
                   <div>
-                    <h3 className="text-lg sm:text-xl font-black text-gray-900">
-                      {category.name}
-                    </h3>
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="text-lg sm:text-xl font-black text-gray-900 group-hover:text-[#123B5D] transition">
+                        {category.name}
+                      </h3>
+                      <span className="text-xl sm:text-2xl transition group-hover:scale-125">
+                        {category.icon || "🧱"}
+                      </span>
+                    </div>
                     {category.description && (
-                      <p className="mt-2 text-xs sm:text-sm leading-relaxed text-gray-500 line-clamp-3">
+                      <p className="mt-2 text-xs sm:text-sm leading-relaxed text-gray-500 line-clamp-2">
                         {category.description}
                       </p>
                     )}
                   </div>
-                  <a
-                    href="#products"
-                    className="mt-4 inline-flex items-center gap-1 font-bold text-sm text-[#123B5D] transition hover:text-[#0B2942]"
-                  >
-                    <span>مشاهدة المنتجات</span>
-                    <span>←</span>
-                  </a>
+                  <div className="mt-4 flex items-center justify-between pt-3 border-t border-gray-100">
+                    <span className="inline-flex items-center gap-1 font-bold text-xs sm:text-sm text-[#123B5D] group-hover:underline">
+                      <span>تصفح معروضات القسم</span>
+                      <span className="transition-transform group-hover:translate-x-[-4px]">←</span>
+                    </span>
+                    <span className="text-[11px] text-gray-400 font-medium">
+                      للعرض فقط
+                    </span>
+                  </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

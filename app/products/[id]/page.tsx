@@ -2,7 +2,6 @@ import { createClient } from "@/lib/supabase-server";
 import NextImage from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import AddToCartButton from "@/components/AddToCartButton";
 import ProductGallery from "@/components/ProductGallery";
 
 type Product = {
@@ -151,25 +150,24 @@ export default async function ProductPage({
             <div className="mt-6 flex flex-col gap-3">
               {safeProduct.available && (
                 <div className="flex flex-col gap-3 sm:flex-row">
-                  <Link
-                    href={`/products/${safeProduct.id}/order`}
-                    className="flex-1 rounded-2xl bg-orange-600 px-6 py-4 text-center font-bold text-white transition hover:bg-orange-700"
+                  <a
+                    href={`https://wa.me/966554304322?text=${encodeURIComponent(
+                      `مرحباً مؤسسة محل البناء الحديث، أود الاستفسار عن تفاصيل وسعر المنتج: ${safeProduct.name}`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5b] px-6 py-4 text-center font-bold text-white shadow-md transition"
                   >
-                    اطلب الآن
-                  </Link>
-
-                  <AddToCartButton
-                    product={safeProduct}
-                  />
+                    💬 استفسار عبر الواتساب
+                  </a>
+                  <a
+                    href="tel:0558689100"
+                    className="rounded-2xl border border-black/10 bg-white px-6 py-4 text-center font-bold text-gray-800 transition hover:bg-gray-100"
+                  >
+                    📞 اتصال بالمبيعات
+                  </a>
                 </div>
               )}
-
-              <a
-                href="#contact"
-                className="rounded-2xl border border-black/10 bg-white px-6 py-4 text-center font-bold transition hover:bg-gray-100"
-              >
-                تواصل معنا
-              </a>
             </div>
 
             {!safeProduct.available && (
