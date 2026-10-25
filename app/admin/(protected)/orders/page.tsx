@@ -184,10 +184,10 @@ export default function OrdersPage() {
   </a>
 
   <a
-    href="tel:+966175423431"
+    href="tel:+966175420300"
     className="rounded-2xl bg-gray-700 px-5 py-4 text-center font-bold text-white transition hover:bg-gray-800"
   >
-    ☎️ 0175423431
+    ☎️ 0175420300
   </a>
 
   <a

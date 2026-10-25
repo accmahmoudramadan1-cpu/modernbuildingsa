@@ -81,7 +81,7 @@ export default function PrivacyPage() {
               <p>إذا كانت لديك أي استفسارات حول سياسة الخصوصية أو بياناتك، يمكنك التواصل معنا عبر:</p>
               <div className="mt-3 rounded-2xl bg-gray-50 p-4 border border-gray-100 text-sm space-y-1">
                 <p><strong>مؤسسة محل البناء الحديث للتجارة</strong></p>
-                <p>الهاتف: 0175423431 | الواتساب: 0554304322</p>
+                <p>الهاتف: 0175420300 | الواتساب: 0554304322</p>
                 <p>البريد الإلكتروني: Info@modernbuildingsa.com</p>
                 <p>العنوان: نجران – أبا السعود – البلد، المملكة العربية السعودية</p>
               </div>
