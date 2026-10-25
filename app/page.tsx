@@ -86,7 +86,9 @@ export default async function Home() {
   const safeProducts: Product[] = products || [];
 
   const settings: SiteSettings = {
-    company_name: siteSettings?.company_name || "مؤسسة محل البناء الحديث للتجارة",
+    company_name: siteSettings?.company_name
+      ? siteSettings.company_name.replace("محل", "معرض")
+      : "مؤسسة معرض البناء الحديث للتجارة",
     phone_1: siteSettings?.phone_1 || "0558689100",
     phone_2: siteSettings?.phone_2 || "0501960009",
     landline: siteSettings?.landline || "0175420300",
@@ -123,12 +125,12 @@ export default async function Home() {
           <Link
             href="/"
             className="flex items-center shrink-0 group py-1"
-            title={settings.company_name || "مؤسسة محل البناء الحديث"}
+            title={settings.company_name || "مؤسسة معرض البناء الحديث"}
           >
             <div className="relative h-12 sm:h-14 md:h-16 lg:h-20 w-44 sm:w-56 md:w-64 lg:w-72 transition group-hover:opacity-90">
               <NextImage
                 src="/logo.png"
-                alt={settings.company_name || "مؤسسة محل البناء الحديث"}
+                alt={settings.company_name || "مؤسسة معرض البناء الحديث"}
                 fill
                 className="object-contain object-right"
                 priority
@@ -423,7 +425,7 @@ export default async function Home() {
                   </div>
                   <div>
                     <h3 className="text-base sm:text-lg font-black text-gray-900">
-                      مؤسسة محل البناء الحديث للتجارة
+                      مؤسسة معرض البناء الحديث للتجارة
                     </h3>
                     <p className="text-xs text-gray-500 font-medium">
                       Modern Building — نجران
@@ -540,7 +542,7 @@ export default async function Home() {
               {/* Responsive Iframe Embed */}
               <div className="relative flex-1 w-full min-h-[320px] sm:min-h-[400px]">
                 <iframe
-                  title="موقع مؤسسة محل البناء الحديث على خرائط جوجل"
+                  title="موقع مؤسسة معرض البناء الحديث على خرائط جوجل"
                   src="https://maps.google.com/maps?q=%D8%A7%D9%84%D8%A8%D9%86%D8%A7%D8%A1+%D8%A7%D9%84%D8%AD%D8%AF%D9%8A%D8%AB+%D9%84%D9%84%D8%A7%D8%AF%D9%88%D8%A7%D8%AA+%D8%A7%D9%84%D8%B3%D8%A8%D8%A7%D9%83%D8%A9+%D9%88%D8%A7%D9%84%D9%83%D9%87%D8%B1%D8%A8%D8%A7%D8%A1%D8%8C+3888+%D8%B7%D8%B1%D9%8A%D9%82+%D8%A7%D9%84%D9%85%D9%84%D9%83+%D8%B9%D8%A8%D8%AF%D8%A7%D9%84%D8%B9%D8%B2%D9%8A%D8%B2%D8%8C+%D8%A7%D8%A8%D8%A7+%D8%A7%D9%84%D8%B3%D8%B9%D9%88%D8%AF%D8%8C+%D9%86%D8%AC%D8%B1%D8%A7%D9%86&t=&z=16&ie=UTF8&iwloc=&output=embed"
                   className="absolute inset-0 h-full w-full border-0"
                   loading="lazy"
@@ -628,7 +630,7 @@ export default async function Home() {
             <div className="relative h-16 sm:h-20 md:h-24 w-60 sm:w-72 md:w-80">
               <NextImage
                 src="/logo-white.png"
-                alt="مؤسسة محل البناء الحديث للتجارة"
+                alt="مؤسسة معرض البناء الحديث للتجارة"
                 fill
                 className="object-contain"
               />
