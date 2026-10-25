@@ -405,7 +405,7 @@ export default async function Home() {
               📍 تفضل بزيارة معرضنا
             </span>
             <h2 className="mt-3 text-2xl sm:text-4xl font-black text-gray-900">
-              موقع المحل على الخريطة
+              موقع المعرض على الخريطة
             </h2>
             <p className="mt-2 text-xs sm:text-base text-gray-600 leading-relaxed">
               يسعدنا تشريفكم في معرضنا الرئيسي بنجران للاطلاع على أحدث مواد البناء والسباكة والكهرباء وتلبية كافة احتياجات مشروعاتكم.
