@@ -456,15 +456,9 @@ export default function WhatsAppInvoicesPage() {
         {/* Footer info */}
         <div className="mt-8 flex flex-col items-center justify-between gap-4 text-xs font-bold text-gray-400 sm:flex-row">
           <p>نظام إشعارات فواتير البناء الحديث © 2026</p>
-          <div className="flex gap-4">
-            <Link href="/admin/orders" className="hover:text-orange-600">
-              طلبات المتجر الإلكتروني
-            </Link>
-            <span>•</span>
-            <Link href="/" className="hover:text-orange-600">
-              المتجر الرئيسي
-            </Link>
-          </div>
+          <Link href="/" className="hover:text-orange-600">
+            العودة للمتجر الرئيسي
+          </Link>
         </div>
       </div>
 
