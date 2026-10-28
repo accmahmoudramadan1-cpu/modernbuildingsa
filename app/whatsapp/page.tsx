@@ -2,6 +2,24 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import {
+  WhatsAppIcon,
+  SettingsScriptIcon,
+  PlusIcon,
+  RefreshIcon,
+  CheckCircleIcon,
+  AlertCircleIcon,
+  InvoiceDocumentIcon,
+  SendPlaneIcon,
+  BoltIcon,
+  ExternalLinkIcon,
+  CloseIcon,
+  BuildingIcon,
+  InfoCircleIcon,
+  DoubleCheckIcon,
+  CopyIcon,
+  SearchIcon,
+} from "./Icons";
 
 interface OracleInvoice {
   id: string;
@@ -23,7 +41,7 @@ export default function WhatsAppInvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "sent" | "failed">("all");
-  
+
   // Modal states
   const [selectedInvoice, setSelectedInvoice] = useState<OracleInvoice | null>(null);
   const [templateName, setTemplateName] = useState("invoice_utility");
@@ -106,7 +124,7 @@ export default function WhatsAppInvoicesPage() {
       if (res.ok && result.success) {
         setActionMessage({
           type: "success",
-          text: `✅ تم إرسال فاتورة رقم (${selectedInvoice.invoice_number}) إلى ${selectedInvoice.phone} بنجاح!`,
+          text: `تم إرسال فاتورة رقم (${selectedInvoice.invoice_number}) إلى ${selectedInvoice.phone} بنجاح!`,
         });
 
         // Update local state
@@ -127,7 +145,7 @@ export default function WhatsAppInvoicesPage() {
       } else {
         setActionMessage({
           type: "error",
-          text: `❌ فشل الإرسال: ${result.error || "تأكد من اعتماد القالب ومفتاح Meta"}`,
+          text: `فشل الإرسال: ${result.error || "تأكد من اعتماد القالب ومفتاح Meta في السيرفر"}`,
         });
       }
     } catch (error: any) {
@@ -195,8 +213,8 @@ export default function WhatsAppInvoicesPage() {
         <div className="flex flex-col gap-4 border-b border-black/10 pb-6 md:flex-row md:items-center md:justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-green-600 text-xl text-white shadow-sm">
-                💬
+              <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-green-600 text-white shadow-sm">
+                <WhatsAppIcon className="h-6 w-6 fill-current" />
               </span>
               <div>
                 <h1 className="text-2xl font-black text-gray-900 sm:text-3xl">
@@ -212,22 +230,27 @@ export default function WhatsAppInvoicesPage() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setShowScriptModal(true)}
-              className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 shadow-sm transition hover:bg-gray-100"
+              className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 shadow-sm transition hover:bg-gray-100"
             >
-              ⚙️ كود سكربت OraNT
+              <SettingsScriptIcon className="h-4 w-4 text-gray-600" />
+              <span>كود سكربت OraNT</span>
             </button>
+
             <button
               onClick={handleAddMockInvoice}
-              className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-bold text-orange-700 transition hover:bg-orange-100"
+              className="flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-bold text-orange-700 transition hover:bg-orange-100"
             >
-              ➕ إضافة فاتورة للتجربة
+              <PlusIcon className="h-4 w-4 text-orange-600" />
+              <span>إضافة فاتورة للتجربة</span>
             </button>
+
             <button
               onClick={loadInvoices}
               disabled={loading}
-              className="rounded-xl bg-black px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl bg-black px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-50"
             >
-              {loading ? "جاري التحديث..." : "🔄 تحديث الفواتير"}
+              <RefreshIcon className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              <span>{loading ? "جاري التحديث..." : "تحديث الفواتير"}</span>
             </button>
           </div>
         </div>
@@ -235,13 +258,18 @@ export default function WhatsAppInvoicesPage() {
         {/* Action Alert Banner */}
         {actionMessage && (
           <div
-            className={`mt-6 rounded-2xl p-4 text-sm font-bold shadow-sm ${
+            className={`mt-6 flex items-center gap-3 rounded-2xl p-4 text-sm font-bold shadow-sm ${
               actionMessage.type === "success"
                 ? "border border-green-200 bg-green-50 text-green-800"
                 : "border border-red-200 bg-red-50 text-red-800"
             }`}
           >
-            {actionMessage.text}
+            {actionMessage.type === "success" ? (
+              <CheckCircleIcon className="h-5 w-5 text-green-600 shrink-0" />
+            ) : (
+              <AlertCircleIcon className="h-5 w-5 text-red-600 shrink-0" />
+            )}
+            <span>{actionMessage.text}</span>
           </div>
         )}
 
@@ -275,12 +303,13 @@ export default function WhatsAppInvoicesPage() {
         {/* Filter & Search Bar */}
         <div className="mt-8 flex flex-col gap-4 rounded-3xl bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="relative flex-1">
+            <SearchIcon className="absolute right-4 top-3.5 h-4 w-4 text-gray-400" />
             <input
               type="text"
               placeholder="ابحث برقم الفاتورة، اسم العميل، أو رقم الهاتف..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full rounded-2xl border border-gray-200 bg-[#f8f8f6] px-4 py-3 text-sm font-bold text-gray-800 outline-none focus:border-orange-500 focus:bg-white"
+              className="w-full rounded-2xl border border-gray-200 bg-[#f8f8f6] py-3 pr-11 pl-4 text-sm font-bold text-gray-800 outline-none focus:border-orange-500 focus:bg-white"
             />
           </div>
 
@@ -337,8 +366,8 @@ export default function WhatsAppInvoicesPage() {
             </div>
           ) : filteredInvoices.length === 0 ? (
             <div className="py-20 text-center">
-              <div className="text-5xl">📄</div>
-              <h3 className="mt-3 text-lg font-black text-gray-800">لا توجد فواتير مطابقة</h3>
+              <InvoiceDocumentIcon className="mx-auto h-16 w-16 text-gray-300" />
+              <h3 className="mt-4 text-lg font-black text-gray-800">لا توجد فواتير مطابقة</h3>
               <p className="mt-1 text-sm text-gray-500">
                 تأكد من تشغيل سكربت استيراد الفواتير على جهاز OraNT أو أضف فاتورة للتجربة.
               </p>
@@ -400,18 +429,19 @@ export default function WhatsAppInvoicesPage() {
                         <div className="flex items-center justify-center gap-2">
                           <button
                             onClick={() => openSendModal(inv)}
-                            className="rounded-xl bg-green-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:bg-green-700 active:scale-95"
+                            className="flex items-center gap-1.5 rounded-xl bg-green-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:bg-green-700 active:scale-95"
                           >
-                            💬 إرسال فاتورة واتساب
+                            <WhatsAppIcon className="h-3.5 w-3.5 fill-current" />
+                            <span>إرسال فاتورة واتساب</span>
                           </button>
                           <a
                             href={`https://wa.me/${inv.phone.replace(/\D/g, "")}`}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="rounded-xl border border-gray-200 bg-white p-2 text-gray-600 transition hover:bg-gray-100"
+                            className="flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2 text-gray-600 transition hover:bg-gray-100"
                             title="فتح محادثة واتساب عادية"
                           >
-                            🔗
+                            <ExternalLinkIcon className="h-3.5 w-3.5" />
                           </a>
                         </div>
                       </td>
@@ -445,8 +475,8 @@ export default function WhatsAppInvoicesPage() {
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-gray-100 bg-[#fbfbfa] px-6 py-5">
               <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-600 text-lg text-white">
-                  ⚡
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-green-600 text-white">
+                  <BoltIcon className="h-5 w-5 fill-current" />
                 </span>
                 <div>
                   <h3 className="text-lg font-black text-gray-900">
@@ -461,7 +491,7 @@ export default function WhatsAppInvoicesPage() {
                 onClick={() => setSelectedInvoice(null)}
                 className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
-                ✕
+                <CloseIcon className="h-4 w-4" />
               </button>
             </div>
 
@@ -479,7 +509,7 @@ export default function WhatsAppInvoicesPage() {
                       value={templateName}
                       onChange={(e) => setTemplateName(e.target.value)}
                       placeholder="e.g. invoice_utility"
-                      className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-bold font-mono outline-none focus:border-green-600"
+                      className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-mono text-xs font-bold outline-none focus:border-green-600"
                     />
                     <p className="mt-1 text-[11px] text-gray-400">
                       اسم القالب كما هو مسجل ومعتمد في Meta WhatsApp Manager.
@@ -580,16 +610,19 @@ export default function WhatsAppInvoicesPage() {
                   <div className="mt-2 rounded-3xl border border-gray-200 bg-[#efeae2] p-4 shadow-inner">
                     {/* Simulated WhatsApp Chat Bubble */}
                     <div className="relative rounded-2xl bg-white p-4 shadow-sm">
-                      <div className="border-b border-gray-100 pb-2">
-                        <p className="text-xs font-black text-green-700">
-                          🏢 مؤسسة البناء الحديث
-                        </p>
-                        <p className="text-[11px] text-gray-400">إشعار فاتورة إلكترونية</p>
+                      <div className="flex items-center gap-2 border-b border-gray-100 pb-2">
+                        <BuildingIcon className="h-4 w-4 text-green-700" />
+                        <div>
+                          <p className="text-xs font-black text-green-700">
+                            مؤسسة البناء الحديث
+                          </p>
+                          <p className="text-[10px] text-gray-400">إشعار فاتورة إلكترونية</p>
+                        </div>
                       </div>
 
                       <div className="mt-3 space-y-2 text-xs leading-relaxed text-gray-800">
                         <p>
-                          مرحباً <span className="font-bold text-gray-900">{param1 || "العميل"}</span> 👋
+                          مرحباً <span className="font-bold text-gray-900">{param1 || "العميل"}</span>
                         </p>
                         <p>
                           تم إصدار فاتورتكم رقم{" "}
@@ -609,7 +642,7 @@ export default function WhatsAppInvoicesPage() {
 
                       <div className="mt-3 flex items-center justify-end gap-1 text-[10px] text-gray-400" dir="ltr">
                         <span>{new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</span>
-                        <span className="text-blue-500 font-bold">✓✓</span>
+                        <DoubleCheckIcon className="h-3.5 w-3.5 text-blue-500" />
                       </div>
                     </div>
 
@@ -640,10 +673,13 @@ export default function WhatsAppInvoicesPage() {
                 {sending ? (
                   <>
                     <span className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
-                    جاري الإرسال...
+                    <span>جاري الإرسال...</span>
                   </>
                 ) : (
-                  <>🚀 إرسال الفاتورة عبر واتساب الآن</>
+                  <>
+                    <SendPlaneIcon className="h-4 w-4" />
+                    <span>إرسال الفاتورة عبر واتساب الآن</span>
+                  </>
                 )}
               </button>
             </div>
@@ -656,25 +692,33 @@ export default function WhatsAppInvoicesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-gray-100 bg-[#fbfbfa] px-6 py-5">
-              <div>
-                <h3 className="text-lg font-black text-gray-900">
-                  ربط السكربت الخارجي لنظام أوراكل (OraNT)
-                </h3>
-                <p className="text-xs font-bold text-gray-500">
-                  خطوات تشغيل السكربت على جهاز أوراكل لإرسال الفواتير إلى الموقع تلقائياً
-                </p>
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-800">
+                  <SettingsScriptIcon className="h-5 w-5 text-gray-700" />
+                </span>
+                <div>
+                  <h3 className="text-lg font-black text-gray-900">
+                    ربط السكربت الخارجي لنظام أوراكل (OraNT)
+                  </h3>
+                  <p className="text-xs font-bold text-gray-500">
+                    خطوات تشغيل السكربت على جهاز أوراكل لإرسال الفواتير إلى الموقع تلقائياً
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setShowScriptModal(false)}
                 className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
-                ✕
+                <CloseIcon className="h-4 w-4" />
               </button>
             </div>
 
             <div className="max-h-[75vh] overflow-y-auto p-6 space-y-5 text-sm">
               <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-                <h4 className="font-black text-blue-900">📌 كيف يعمل الربط؟</h4>
+                <div className="flex items-center gap-2 font-black text-blue-900">
+                  <InfoCircleIcon className="h-4 w-4 text-blue-600" />
+                  <h4>كيف يعمل الربط؟</h4>
+                </div>
                 <ol className="mt-2 list-decimal pr-5 space-y-1 text-xs text-blue-800 leading-relaxed font-semibold">
                   <li>السكربت الخارجي يعمل على الجهاز المثبت عليه أوراكل / OraNT بحساب يملك صلاحية قراءة.</li>
                   <li>يستخرج الفواتير الجديدة (رقم الفاتورة، العميل، الهاتف، المبلغ، التاريخ).</li>
@@ -705,9 +749,19 @@ export default function WhatsAppInvoicesPage() {
                       setCopiedScript(true);
                       setTimeout(() => setCopiedScript(false), 3000);
                     }}
-                    className="text-xs font-bold text-orange-600 hover:underline"
+                    className="flex items-center gap-1.5 text-xs font-bold text-orange-600 hover:underline"
                   >
-                    {copiedScript ? "✅ تم النسخ!" : "نسخ مسار الملف"}
+                    {copiedScript ? (
+                      <>
+                        <CheckCircleIcon className="h-3.5 w-3.5 text-green-600" />
+                        <span>تم النسخ!</span>
+                      </>
+                    ) : (
+                      <>
+                        <CopyIcon className="h-3.5 w-3.5" />
+                        <span>نسخ مسار الملف</span>
+                      </>
+                    )}
                   </button>
                 </div>
                 <div className="mt-2 rounded-2xl bg-gray-900 p-4 font-mono text-xs text-green-400" dir="ltr">
