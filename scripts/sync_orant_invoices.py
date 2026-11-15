@@ -619,7 +619,7 @@ def discover_onyx_tables():
         cur = conn.cursor()
         patterns = [
             "IAS_BILL", "BILL", "INVC", "VOUCH", "VCHR", "RCPT", "CASH",
-            "ALRT", "MSG", "QUOT", "QT_", "PO_", "PRCH", "NTCE", "DISC",
+            "ALRT", "MSG", "QUOT", "QT_", "PO_", "PRCH", "PUR", "ORD", "NTCE", "DISC",
             "CUST", "V_DET", "VEND", "VNDR", "EX_RATE", "AR_",
         ]
         like_clauses = " OR ".join([f"UPPER(TABLE_NAME) LIKE '%{p}%'" for p in patterns])
@@ -639,6 +639,33 @@ def discover_onyx_tables():
         for owner, table_name, num_rows in rows:
             print(f"  {owner}.{table_name:<35} (صفوف تقريبية: {num_rows})")
         print("-" * 70)
+
+        target_tables = (
+            "VOUCHERS", "VOUCHER_DETAIL", "QUOTATION", "QUOTATION_DETAIL",
+            "IAS_MSG_SMS", "IAS_MSG_SMS_DTL", "S_ALRT_SYS_MST", "S_ALRT_SYS_DTL",
+            "IAS_BILL_MST_ADD_DISC", "IAS_BILL_ADD_DISC_BILLS", "CUSTOMER_CURR",
+            "IAS_CASH_CUSTMR", "IAS_PI_BILL_MST", "IAS_PR_BILL_MST",
+        )
+        po_tables = [t for _, t, cnt in rows if ("ORD" in t or "PUR" in t or "REQ" in t) and (cnt or 0) > 0]
+        inspect_list = list(dict.fromkeys(list(target_tables) + po_tables))
+        in_clause = ",".join([f"'{t}'" for t in inspect_list])
+        col_owner = f"UPPER(OWNER) = UPPER('{schema_name}')" if schema_name else "OWNER NOT IN ('SYS','SYSTEM','OUTLN','DBSNMP')"
+        cur.execute(f"""
+            SELECT TABLE_NAME, COLUMN_NAME
+            FROM ALL_TAB_COLUMNS
+            WHERE {col_owner} AND TABLE_NAME IN ({in_clause})
+            ORDER BY TABLE_NAME, COLUMN_ID
+        """)
+        cols_by_table = {}
+        for tname, cname in cur.fetchall():
+            cols_by_table.setdefault(tname, []).append(cname)
+
+        if cols_by_table:
+            print("\n[+] أعمدة الجداول المهمة:")
+            for tname, cols in cols_by_table.items():
+                print(f"  * {tname}: {', '.join(cols)}")
+            print("-" * 70)
+
         print("[i] استخدم هذه الأسماء لتحديث قاموس ONYX_QUERIES داخل السكربت إذا اختلفت عن نسختك.")
         cur.close()
         conn.close()
