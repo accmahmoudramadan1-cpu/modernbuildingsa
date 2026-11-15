@@ -25,6 +25,7 @@
 import sys
 import os
 import time
+import glob
 import sqlite3
 import argparse
 import re
@@ -37,32 +38,87 @@ except ImportError:
     sys.exit(1)
 
 # =============================================================================
-# الإعدادات الافتراضية (يمكن تعديلها أو تمريرها عبر متغيرات البيئة)
+# الإعدادات الافتراضية (جاهزة للعمل على جهاز العميل - يمكن تجاوزها بمتغيرات البيئة)
 # =============================================================================
-API_ENDPOINT = os.getenv("MODERN_BUILDING_API_URL", "https://modernbuildingsa.com/api/oracle-orders")
+API_ENDPOINT = os.getenv("MODERN_BUILDING_API_URL", "https://www.modernbuildingsa.com/api/oracle-orders")
 API_KEY = os.getenv("ORACLE_SYNC_API_KEY", "modern_building_orant_sync_secret_2026")
 
-# إعدادات اتصال أوراكل (مطابقة لملف tnsnames.ora في OraNT)
+# إعدادات اتصال أوراكل (مطابقة لملف tnsnames.ora في OraNT وبيانات العميل)
 ORACLE_HOST = os.getenv("ORACLE_HOST", "onyxserver")
 ORACLE_PORT = int(os.getenv("ORACLE_PORT", "1521"))
 ORACLE_SID = os.getenv("ORACLE_SID", "orcl")
-ORACLE_USER = os.getenv("ORACLE_USER", "ONYX_READONLY")
-ORACLE_PASS = os.getenv("ORACLE_PASS", "")
-ORACLE_SCHEMA = os.getenv("ORACLE_SCHEMA", "")  # اختياري: اسم السكيما إن وجد مثل ONYX أو IAS
+ORACLE_USER = os.getenv("ORACLE_USER", "1")
+ORACLE_PASS = os.getenv("ORACLE_PASS", "01072025")
+ORACLE_SCHEMA = os.getenv("ORACLE_SCHEMA", "")  # اختياري: يكتشف السكربت السكيما تلقائياً إذا ترك فارغاً
+SYNC_DAYS_BACK = int(os.getenv("SYNC_DAYS_BACK", "14"))  # عدد أيام البحث للخلف في قاعدة البيانات
 
 TRACKER_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "invoices_tracker.db")
+
+_THICK_MODE_INITIALIZED = False
+_RESOLVED_CREDENTIAL = None
+_RESOLVED_SCHEMA = None
 
 
 # =============================================================================
 # استعلامات SQL لكل شاشة ونوع مستند في Onyx Pro ERP
-# ملاحظة: قم بتشغيل (--discover) أولاً للتأكد من أسماء الجداول والأعمدة
-# في قاعدة البيانات لديك، ثم عدّل الاستعلامات أدناه إذا لزم الأمر.
+# مبنية على أسماء الجداول والأعمدة الفعلية المستخرجة من ملفات النظام (RDF/OraNT)
+# مع استعلامات بديلة (Fallback) تدعم اختلاف إصدارات أونكس برو تلقائياً.
 # =============================================================================
 ONYX_QUERIES = {
-    # 1 & 2. الفواتير النقدية والآجلة (Sales Invoices)
+    # 1 & 2. الفواتير النقدية والآجلة (IAS_BILL_MST + IAS_BILL_DTL + CUSTOMER + EX_RATE)
     "sales_invoices": {
         "enabled": True,
-        "sql": """
+        "sql_candidates": [
+            f"""
+            SELECT
+                TO_CHAR(M.BILL_NO) AS DOC_NO,
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
+                TO_CHAR(M.C_CODE) AS CUST_CODE,
+                NVL(C.C_A_NAME, M.C_NAME) AS CUST_NAME,
+                COALESCE(C.C_MOBILE, C.C_PHONE, M.C_TEL) AS PHONE,
+                TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                ROUND(
+                    NVL((
+                        SELECT SUM(
+                            (NVL(D.I_QTY, 0) * (NVL(D.I_PRICE, 0) - NVL(D.DIS_AMT, 0)))
+                            + (NVL(D.I_QTY, 0) * NVL(D.VAT_AMT, 0))
+                        )
+                        FROM IAS_BILL_DTL D
+                        WHERE D.BILL_SER = M.BILL_SER
+                    ), 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0),
+                    2
+                ) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س'))) AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
+                'SI' AS FORM_CODE,
+                M.A_DESC AS DETAILS
+            FROM IAS_BILL_MST M
+            LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(M.BILL_CURRENCY)
+            WHERE M.BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            ORDER BY M.BILL_DATE DESC, M.BILL_NO DESC
+            """,
+            f"""
+            SELECT
+                TO_CHAR(M.BILL_NO) AS DOC_NO,
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
+                TO_CHAR(M.C_CODE) AS CUST_CODE,
+                NVL(C.C_A_NAME, M.C_NAME) AS CUST_NAME,
+                COALESCE(C.C_MOBILE, C.C_PHONE, M.C_TEL) AS PHONE,
+                TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                NVL(M.BILL_AMT, 0) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س')) AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
+                'SI' AS FORM_CODE,
+                M.A_DESC AS DETAILS
+            FROM IAS_BILL_MST M
+            LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
+            WHERE M.BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            ORDER BY M.BILL_DATE DESC, M.BILL_NO DESC
+            """,
+            f"""
             SELECT
                 TO_CHAR(M.BILL_NO) AS DOC_NO,
                 CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
@@ -78,16 +134,58 @@ ONYX_QUERIES = {
                 M.BILL_DESC AS DETAILS
             FROM IAS_SL_INVC_MST M
             LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = M.C_CODE
-            WHERE M.BILL_DATE >= TRUNC(SYSDATE) - 3
+            WHERE M.BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
             ORDER BY M.BILL_DATE DESC, M.BILL_NO DESC
-        """
+            """,
+        ],
     },
     # 3. سندات القبض (Receipt Vouchers)
     "receipt_vouchers": {
         "enabled": True,
-        "sql": """
+        "sql_candidates": [
+            f"""
             SELECT
-                TO_CHAR(V.VOUCHER_NO) AS DOC_NO,
+                'RV-' || TO_CHAR(V.VOUCHER_NO) AS DOC_NO,
+                'receipt_voucher' AS DOC_TYPE,
+                TO_CHAR(V.C_CODE) AS CUST_CODE,
+                C.C_A_NAME AS CUST_NAME,
+                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
+                TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                NVL(V.VOUCHER_AMT, 0) AS AMOUNT,
+                'ر.س' AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                NVL(V.V_DESC, 'نقداً / تحويل بنكي') AS PAYMENT_METHOD,
+                'RV' AS FORM_CODE,
+                V.V_DESC AS DETAILS
+            FROM VOUCHER_MST V
+            LEFT JOIN CUSTOMER C ON C.C_CODE = V.C_CODE
+            WHERE V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+              AND V.VOUCHER_TYPE = 1
+            ORDER BY V.VOUCHER_DATE DESC
+            """,
+            f"""
+            SELECT
+                'RV-' || TO_CHAR(V.VOUCHER_NO) AS DOC_NO,
+                'receipt_voucher' AS DOC_TYPE,
+                TO_CHAR(V.C_CODE) AS CUST_CODE,
+                C.C_A_NAME AS CUST_NAME,
+                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
+                TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                NVL(V.VOUCHER_AMT, 0) AS AMOUNT,
+                NVL(V.CUR_CODE, 'ر.س') AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                NVL(V.PAY_TYPE_NAME, 'نقداً / تحويل بنكي') AS PAYMENT_METHOD,
+                'RV' AS FORM_CODE,
+                V.V_DESC AS DETAILS
+            FROM IAS_VCHR_MST V
+            LEFT JOIN CUSTOMER C ON C.C_CODE = V.C_CODE
+            WHERE V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+              AND V.VOUCHER_TYPE = 1
+            ORDER BY V.VOUCHER_DATE DESC
+            """,
+            f"""
+            SELECT
+                'RV-' || TO_CHAR(V.VOUCHER_NO) AS DOC_NO,
                 'receipt_voucher' AS DOC_TYPE,
                 TO_CHAR(V.C_CODE) AS CUST_CODE,
                 C.C_A_NAME AS CUST_NAME,
@@ -101,21 +199,23 @@ ONYX_QUERIES = {
                 V.V_DESC AS DETAILS
             FROM IAS_VCHR_MST V
             LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = V.C_CODE
-            WHERE V.VOUCHER_DATE >= TRUNC(SYSDATE) - 3
+            WHERE V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
               AND V.VOUCHER_TYPE = 1
             ORDER BY V.VOUCHER_DATE DESC
-        """
+            """,
+        ],
     },
     # 4 & 8. شاشة الرسائل المباشرة وكشوف المطابقة (ALRTT002) - طريقة التواصل = 8 (واتساب)
     "direct_alerts_alrtt002": {
         "enabled": True,
-        "sql": """
+        "sql_candidates": [
+            f"""
             SELECT
                 'ALRT-' || TO_CHAR(H.MSG_NO) || '-' || TO_CHAR(D.C_CODE) AS DOC_NO,
                 CASE WHEN NVL(D.SND_STMT, 0) = 1 THEN 'account_statement' ELSE 'direct_alert' END AS DOC_TYPE,
                 TO_CHAR(D.C_CODE) AS CUST_CODE,
                 NVL(D.C_NAME, C.C_A_NAME) AS CUST_NAME,
-                NVL(D.MOBILE_NO, NVL(C.C_MOBILE, C.C_TEL)) AS PHONE,
+                COALESCE(D.MOBILE_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
                 TO_CHAR(NVL(H.AD_DATE, SYSDATE), 'YYYY-MM-DD') AS DOC_DATE,
                 NVL(D.BAL_AMT, 0) AS AMOUNT,
                 NVL(H.CUR_CODE, 'ر.س') AS CURRENCY,
@@ -125,21 +225,43 @@ ONYX_QUERIES = {
                 H.MSG_TXT AS DETAILS
             FROM IAS_ALRT_MSG_MST H
             JOIN IAS_ALRT_MSG_DTL D ON D.MSG_NO = H.MSG_NO
-            LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = D.C_CODE
+            LEFT JOIN CUSTOMER C ON C.C_CODE = D.C_CODE
             WHERE NVL(H.COMM_TYPE, 8) = 8
-              AND NVL(H.AD_DATE, SYSDATE) >= TRUNC(SYSDATE) - 7
-        """
+              AND NVL(H.AD_DATE, SYSDATE) >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+            f"""
+            SELECT
+                'ALRT-' || TO_CHAR(H.MSG_NO) || '-' || TO_CHAR(D.C_CODE) AS DOC_NO,
+                CASE WHEN NVL(D.SND_STMT, 0) = 1 THEN 'account_statement' ELSE 'direct_alert' END AS DOC_TYPE,
+                TO_CHAR(D.C_CODE) AS CUST_CODE,
+                NVL(D.C_NAME, C.C_A_NAME) AS CUST_NAME,
+                COALESCE(D.MOBILE_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
+                TO_CHAR(NVL(H.AD_DATE, SYSDATE), 'YYYY-MM-DD') AS DOC_DATE,
+                NVL(D.BAL_AMT, 0) AS AMOUNT,
+                NVL(H.CUR_CODE, 'ر.س') AS CURRENCY,
+                NVL(D.BAL_AMT, 0) AS REMAINING_BALANCE,
+                NULL AS PAYMENT_METHOD,
+                'ALRTT002' AS FORM_CODE,
+                H.MSG_TXT AS DETAILS
+            FROM ALRT_MSG_MST H
+            JOIN ALRT_MSG_DTL D ON D.MSG_NO = H.MSG_NO
+            LEFT JOIN CUSTOMER C ON C.C_CODE = D.C_CODE
+            WHERE NVL(H.COMM_TYPE, 8) = 8
+              AND NVL(H.AD_DATE, SYSDATE) >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+        ],
     },
     # 5. عروض الأسعار (Price Quotations)
     "price_quotations": {
         "enabled": True,
-        "sql": """
+        "sql_candidates": [
+            f"""
             SELECT
-                TO_CHAR(Q.QT_NO) AS DOC_NO,
+                'QT-' || TO_CHAR(Q.QT_NO) AS DOC_NO,
                 'price_quotation' AS DOC_TYPE,
                 TO_CHAR(Q.C_CODE) AS CUST_CODE,
                 NVL(C.C_A_NAME, Q.C_NAME) AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_TEL) AS PHONE,
+                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
                 TO_CHAR(Q.QT_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 NVL(Q.QT_NET_AMT, Q.QT_AMT) AS AMOUNT,
                 NVL(Q.CUR_CODE, 'ر.س') AS CURRENCY,
@@ -148,16 +270,54 @@ ONYX_QUERIES = {
                 'QT' AS FORM_CODE,
                 Q.QT_DESC AS DETAILS
             FROM IAS_QUOT_MST Q
-            LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = Q.C_CODE
-            WHERE Q.QT_DATE >= TRUNC(SYSDATE) - 7
-        """
+            LEFT JOIN CUSTOMER C ON C.C_CODE = Q.C_CODE
+            WHERE Q.QT_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+            f"""
+            SELECT
+                'QT-' || TO_CHAR(Q.QT_NO) AS DOC_NO,
+                'price_quotation' AS DOC_TYPE,
+                TO_CHAR(Q.C_CODE) AS CUST_CODE,
+                NVL(C.C_A_NAME, Q.C_NAME) AS CUST_NAME,
+                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
+                TO_CHAR(Q.QT_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                NVL(Q.QT_AMT, 0) AS AMOUNT,
+                'ر.س' AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                NULL AS PAYMENT_METHOD,
+                'QT' AS FORM_CODE,
+                Q.QT_DESC AS DETAILS
+            FROM IAS_QT_MST Q
+            LEFT JOIN CUSTOMER C ON C.C_CODE = Q.C_CODE
+            WHERE Q.QT_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+        ],
     },
-    # 6. طلبات الشراء للموردين (Purchase Orders)
+    # 6. طلبات الشراء للموردين (Purchase Orders - V_DETAILS)
     "purchase_orders": {
         "enabled": True,
-        "sql": """
+        "sql_candidates": [
+            f"""
             SELECT
-                TO_CHAR(P.PO_NO) AS DOC_NO,
+                'PO-' || TO_CHAR(P.PO_NO) AS DOC_NO,
+                'purchase_order' AS DOC_TYPE,
+                TO_CHAR(P.V_CODE) AS CUST_CODE,
+                NVL(V.V_A_NAME, P.V_NAME) AS CUST_NAME,
+                NVL(V.V_MOBILE, V.V_PHONE) AS PHONE,
+                TO_CHAR(P.PO_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                NVL(P.PO_AMT, 0) AS AMOUNT,
+                NVL(P.CUR_CODE, 'ر.س') AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                NULL AS PAYMENT_METHOD,
+                'PO' AS FORM_CODE,
+                P.PO_DESC AS DETAILS
+            FROM IAS_PO_MST P
+            LEFT JOIN V_DETAILS V ON V.V_CODE = P.V_CODE
+            WHERE P.PO_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+            f"""
+            SELECT
+                'PO-' || TO_CHAR(P.PO_NO) AS DOC_NO,
                 'purchase_order' AS DOC_TYPE,
                 TO_CHAR(P.V_CODE) AS CUST_CODE,
                 NVL(V.V_A_NAME, P.V_NAME) AS CUST_NAME,
@@ -171,15 +331,35 @@ ONYX_QUERIES = {
                 P.PO_DESC AS DETAILS
             FROM IAS_PO_MST P
             LEFT JOIN IAS_VENDOR V ON V.V_CODE = P.V_CODE
-            WHERE P.PO_DATE >= TRUNC(SYSDATE) - 7
-        """
+            WHERE P.PO_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+        ],
     },
     # 7. إشعارات خصم العملاء المتعدد (شاشة ARST045)
     "customer_discount_notices_arst045": {
         "enabled": True,
-        "sql": """
+        "sql_candidates": [
+            f"""
             SELECT
-                TO_CHAR(N.DOC_NO) AS DOC_NO,
+                'ARST-' || TO_CHAR(N.DOC_NO) AS DOC_NO,
+                'customer_discount_notice' AS DOC_TYPE,
+                TO_CHAR(N.C_CODE) AS CUST_CODE,
+                C.C_A_NAME AS CUST_NAME,
+                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
+                TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                NVL(N.TOT_AMT_WITH_TAX, N.DISC_AMT) AS AMOUNT,
+                NVL(N.CUR_CODE, 'ر.س') AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                NVL(N.DOC_DESC, 'خصم سداد') AS PAYMENT_METHOD,
+                'ARST045' AS FORM_CODE,
+                N.DOC_DESC AS DETAILS
+            FROM AR_CUST_NTCE_MST N
+            LEFT JOIN CUSTOMER C ON C.C_CODE = N.C_CODE
+            WHERE N.DOC_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+            f"""
+            SELECT
+                'ARST-' || TO_CHAR(N.DOC_NO) AS DOC_NO,
                 'customer_discount_notice' AS DOC_TYPE,
                 TO_CHAR(N.C_CODE) AS CUST_CODE,
                 C.C_A_NAME AS CUST_NAME,
@@ -193,8 +373,9 @@ ONYX_QUERIES = {
                 N.DOC_DESC AS DETAILS
             FROM AR_CUST_NTCE_MST N
             LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = N.C_CODE
-            WHERE N.DOC_DATE >= TRUNC(SYSDATE) - 7
-        """
+            WHERE N.DOC_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            """,
+        ],
     },
 }
 
@@ -260,8 +441,89 @@ def clean_phone_number(raw_phone: str) -> str:
     return digits
 
 
+def _init_thick_mode(oracledb) -> bool:
+    """تفعيل Thick Mode في مكتبة oracledb عند الاتصال بقواعد بيانات Oracle 11g أو الأقدم"""
+    global _THICK_MODE_INITIALIZED
+    if _THICK_MODE_INITIALIZED:
+        return True
+    if not hasattr(oracledb, "init_oracle_client"):
+        return False
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    candidates = []
+    if os.getenv("ORACLE_CLIENT_LIB_DIR"):
+        candidates.append(os.getenv("ORACLE_CLIENT_LIB_DIR"))
+
+    for pattern in (
+        r"C:\oracle\instantclient*",
+        r"D:\oracle\instantclient*",
+        r"C:\instantclient*",
+        os.path.join(script_dir, "instantclient*"),
+        r"C:\app\*\product\*\client*\bin",
+    ):
+        candidates.extend(sorted(glob.glob(pattern), reverse=True))
+
+    candidates.extend([r"C:\OraNT\BIN", r"D:\OraNT\BIN", None])
+
+    for lib_dir in candidates:
+        if lib_dir is not None and not os.path.isdir(lib_dir):
+            continue
+        try:
+            if lib_dir:
+                oracledb.init_oracle_client(lib_dir=lib_dir)
+                print(f"[✓] تم تفعيل وضع الاتصال المتوافق (Thick Mode) من: {lib_dir}")
+            else:
+                oracledb.init_oracle_client()
+                print("[✓] تم تفعيل وضع الاتصال المتوافق (Thick Mode) من مسار النظام (PATH).")
+            _THICK_MODE_INITIALIZED = True
+            return True
+        except Exception as init_err:
+            err_msg = str(init_err)
+            if "already been initialized" in err_msg.lower() or "already initialized" in err_msg.lower():
+                _THICK_MODE_INITIALIZED = True
+                return True
+            continue
+
+    print("\n[خطأ هام] خادم أوراكل لديك قديم (Oracle 11g أو أقدم) ويتطلب Oracle Instant Client (64-bit)!")
+    print("  الحل السريع:")
+    print("  1. حمّل حزمة Instant Client Basic Light 64-bit من أوراكل وفك ضغطها في: C:\\oracle\\instantclient")
+    print("  2. أو أضف مسار DLL أوراكل 64-bit إلى متغير البيئة ORACLE_CLIENT_LIB_DIR ثم أعد المحاولة.\n")
+    return False
+
+
+def _detect_and_set_schema(conn, connected_user: str):
+    """اكتشاف السكيما المالكة لجداول أونكس (IAS20261 / IAS20251) وضبط CURRENT_SCHEMA تلقائياً"""
+    global _RESOLVED_SCHEMA
+    target_schema = (ORACLE_SCHEMA or _RESOLVED_SCHEMA or "").strip()
+
+    try:
+        cur = conn.cursor()
+        if not target_schema:
+            cur.execute("""
+                SELECT OWNER
+                FROM ALL_TABLES
+                WHERE TABLE_NAME IN ('IAS_BILL_MST', 'CUSTOMER')
+                  AND OWNER NOT IN ('SYS', 'SYSTEM', 'OUTLN', 'DBSNMP')
+                ORDER BY DECODE(OWNER, USER, 0, 'IAS20261', 1, 'IAS20251', 2, 3), OWNER DESC
+            """)
+            row = cur.fetchone()
+            if row and row[0]:
+                target_schema = str(row[0]).strip()
+                _RESOLVED_SCHEMA = target_schema
+
+        if target_schema and re.match(r"^[A-Za-z0-9_$#]+$", target_schema):
+            clean_connected = connected_user.strip('"').upper()
+            if target_schema.upper() != clean_connected:
+                cur.execute(f"ALTER SESSION SET CURRENT_SCHEMA = {target_schema}")
+                print(f"[✓] تم ضبط السكيما النشطة تلقائياً إلى: {target_schema}")
+        cur.close()
+    except Exception as schema_err:
+        print(f"[!] تنبيه أثناء تحديد السكيما التلقائية: {schema_err}")
+
+
 def get_oracle_connection():
-    """فتح اتصال مع قاعدة بيانات أوراكل"""
+    """فتح اتصال مع قاعدة بيانات أوراكل مع دعم التحويل التلقائي لحساب السكيما وThick Mode"""
+    global _RESOLVED_CREDENTIAL
     try:
         import oracledb
     except ImportError:
@@ -273,7 +535,58 @@ def get_oracle_connection():
             return None
 
     dsn = oracledb.makedsn(ORACLE_HOST, ORACLE_PORT, sid=ORACLE_SID)
-    return oracledb.connect(user=ORACLE_USER, password=ORACLE_PASS, dsn=dsn)
+
+    raw_candidates = []
+    if _RESOLVED_CREDENTIAL:
+        raw_candidates.append(_RESOLVED_CREDENTIAL)
+
+    raw_candidates.extend([
+        (ORACLE_USER, ORACLE_PASS),
+        (f'"{ORACLE_USER}"', ORACLE_PASS) if ORACLE_USER.isdigit() else None,
+        ("IAS20261", ORACLE_PASS),
+        ("IAS20261", "IAS20261"),
+        ("IAS20251", ORACLE_PASS),
+        ("IAS20251", "IAS20251"),
+        ("IAS_SYS", ORACLE_PASS),
+        ("IAS_SYS", "IAS_SYS"),
+        ("IAS", ORACLE_PASS),
+        ("IAS", "IAS"),
+    ])
+
+    candidates = []
+    seen = set()
+    for item in raw_candidates:
+        if item and item not in seen:
+            seen.add(item)
+            candidates.append(item)
+
+    idx = 0
+    while idx < len(candidates):
+        user, pwd = candidates[idx]
+        try:
+            conn = oracledb.connect(user=user, password=pwd, dsn=dsn)
+            _RESOLVED_CREDENTIAL = (user, pwd)
+            print(f"[✓] تم الاتصال بقاعدة بيانات أوراكل بنجاح بالمستخدم: {user}")
+            _detect_and_set_schema(conn, user)
+            return conn
+        except Exception as err:
+            err_str = str(err)
+            # دعم اتصال Oracle 11g/10g عبر Thick Mode تلقائياً
+            if "DPY-3010" in err_str:
+                if _init_thick_mode(oracledb):
+                    continue
+                return None
+            # خطأ في اسم المستخدم/كلمة المرور -> جرب السكيما التالية
+            if "ORA-01017" in err_str:
+                print(f"  [!] الحساب ({user}) لم يقبل الدخول (ORA-01017)، جاري تجربة السكيما التالية...")
+                idx += 1
+                continue
+            print(f"[خطأ اتصال بأوراكل] ({user}): {err_str}")
+            return None
+
+    print("[خطأ] فشلت جميع محاولات تسجيل الدخول لقاعدة بيانات أوراكل (ORA-01017).")
+    print("      يرجى التحقق من اسم مستخدم قاعدة البيانات أو تعيين ORACLE_USER و ORACLE_PASS.")
+    return None
 
 
 def discover_onyx_tables():
@@ -285,10 +598,15 @@ def discover_onyx_tables():
 
     try:
         cur = conn.cursor()
-        patterns = ["INVC", "BILL", "VCHR", "RCPT", "ALRT", "MSG", "QUOT", "QT", "PO", "NTCE", "DISC", "CUST", "VNDR"]
+        patterns = [
+            "IAS_BILL", "BILL", "INVC", "VOUCH", "VCHR", "RCPT", "CASH",
+            "ALRT", "MSG", "QUOT", "QT_", "PO_", "PRCH", "NTCE", "DISC",
+            "CUST", "V_DET", "VEND", "VNDR", "EX_RATE", "AR_",
+        ]
         like_clauses = " OR ".join([f"UPPER(TABLE_NAME) LIKE '%{p}%'" for p in patterns])
 
-        owner_filter = f"AND UPPER(OWNER) = UPPER('{ORACLE_SCHEMA}')" if ORACLE_SCHEMA else "AND OWNER NOT IN ('SYS','SYSTEM','OUTLN','DBSNMP')"
+        schema_name = ORACLE_SCHEMA or _RESOLVED_SCHEMA
+        owner_filter = f"AND UPPER(OWNER) = UPPER('{schema_name}')" if schema_name else "AND OWNER NOT IN ('SYS','SYSTEM','OUTLN','DBSNMP')"
         sql = f"""
             SELECT OWNER, TABLE_NAME, NUM_ROWS
             FROM ALL_TABLES
@@ -323,31 +641,50 @@ def fetch_documents_from_oracle():
         for section_name, cfg in ONYX_QUERIES.items():
             if not cfg.get("enabled"):
                 continue
-            try:
-                cursor.execute(cfg["sql"])
-                rows = cursor.fetchall()
-                print(f"  [✓] {section_name}: تم سحب {len(rows)} سجل.")
-                for r in rows:
-                    doc_no = str(r[0]).strip()
-                    phone = clean_phone_number(r[4])
-                    if not doc_no or not phone:
+
+            queries = cfg.get("sql_candidates") or ([cfg["sql"]] if cfg.get("sql") else [])
+            section_succeeded = False
+            last_schema_err = None
+
+            for sql in queries:
+                try:
+                    cursor.execute(sql)
+                    rows = cursor.fetchall()
+                    valid_count = 0
+                    for r in rows:
+                        doc_no = str(r[0]).strip() if r[0] is not None else ""
+                        phone = clean_phone_number(r[4])
+                        if not doc_no or not phone:
+                            continue
+                        valid_count += 1
+                        documents.append({
+                            "invoice_number": doc_no,
+                            "doc_type": str(r[1] or "cash_invoice").strip(),
+                            "customer_code": str(r[2]).strip() if r[2] is not None else None,
+                            "customer_name": str(r[3] or "عميل").strip(),
+                            "phone": phone,
+                            "invoice_date": str(r[5] or datetime.now().strftime("%Y-%m-%d")),
+                            "amount": float(r[6] or 0),
+                            "currency": str(r[7] or "ر.س").strip(),
+                            "remaining_balance": float(r[8]) if r[8] is not None else None,
+                            "payment_method": str(r[9]).strip() if r[9] is not None else None,
+                            "onyx_form_code": str(r[10]).strip() if r[10] is not None else None,
+                            "details": str(r[11] or "").strip(),
+                        })
+                    print(f"  [✓] {section_name}: تم سحب {len(rows)} سجل ({valid_count} برقم جوال صالح).")
+                    section_succeeded = True
+                    break
+                except Exception as q_err:
+                    err_str = str(q_err)
+                    if "ORA-00942" in err_str or "ORA-00904" in err_str:
+                        last_schema_err = err_str
                         continue
-                    documents.append({
-                        "invoice_number": doc_no,
-                        "doc_type": str(r[1] or "cash_invoice").strip(),
-                        "customer_code": str(r[2]).strip() if r[2] is not None else None,
-                        "customer_name": str(r[3] or "عميل").strip(),
-                        "phone": phone,
-                        "invoice_date": str(r[5] or datetime.now().strftime("%Y-%m-%d")),
-                        "amount": float(r[6] or 0),
-                        "currency": str(r[7] or "ر.س").strip(),
-                        "remaining_balance": float(r[8]) if r[8] is not None else None,
-                        "payment_method": str(r[9]).strip() if r[9] is not None else None,
-                        "onyx_form_code": str(r[10]).strip() if r[10] is not None else None,
-                        "details": str(r[11] or "").strip(),
-                    })
-            except Exception as q_err:
-                print(f"  [!] تنبيه في استعلام ({section_name}): {q_err}")
+                    print(f"  [!] تنبيه في استعلام ({section_name}): {err_str}")
+                    section_succeeded = True
+                    break
+
+            if not section_succeeded and last_schema_err:
+                print(f"  [i] تخطي ({section_name}) لعدم تطابق اسم الجدول/العمود ({last_schema_err.splitlines()[0]}) - شغّل --discover لعرض الأسماء الدقيقة.")
 
         cursor.close()
         conn.close()

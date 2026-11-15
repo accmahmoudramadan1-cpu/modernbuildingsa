@@ -5,9 +5,14 @@ setlocal
 :: تحديد مسار المجلد الحالي للسكربت
 cd /d "%~dp0"
 
-:: الرابط والمفتاح الافتراضي (يمكن تخصيصهم هنا أو في بيئة النظام)
-set MODERN_BUILDING_API_URL=https://modernbuildingsa.com/api/oracle-orders
+:: الرابط والمفتاح الافتراضي وبيانات أوراكل (يمكن تخصيصهم هنا أو في بيئة النظام)
+set MODERN_BUILDING_API_URL=https://www.modernbuildingsa.com/api/oracle-orders
 set ORACLE_SYNC_API_KEY=modern_building_orant_sync_secret_2026
+set ORACLE_HOST=onyxserver
+set ORACLE_PORT=1521
+set ORACLE_SID=orcl
+set ORACLE_USER=1
+set ORACLE_PASS=01072025
 
 :: حلقة التكرار كل 60 ثانية للمزامنة المستمرة
 echo [%date% %time%] بدء تشغيل خدمة مزامنة فواتير OraNT مع modernbuildingsa.com >> "%~dp0sync_service.log"
