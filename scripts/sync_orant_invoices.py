@@ -47,9 +47,9 @@ API_KEY = os.getenv("ORACLE_SYNC_API_KEY", "modern_building_orant_sync_secret_20
 ORACLE_HOST = os.getenv("ORACLE_HOST", "onyxserver")
 ORACLE_PORT = int(os.getenv("ORACLE_PORT", "1521"))
 ORACLE_SID = os.getenv("ORACLE_SID", "orcl")
-ORACLE_USER = os.getenv("ORACLE_USER", "1")
-ORACLE_PASS = os.getenv("ORACLE_PASS", "01072025")
-ORACLE_SCHEMA = os.getenv("ORACLE_SCHEMA", "")  # اختياري: يكتشف السكربت السكيما تلقائياً إذا ترك فارغاً
+ORACLE_USER = os.getenv("ORACLE_USER", "ONYX_READONLY")
+ORACLE_PASS = os.getenv("ORACLE_PASS", "ModernSync_2026")
+ORACLE_SCHEMA = os.getenv("ORACLE_SCHEMA", "IAS20261")  # سكيما السنة المالية النشطة (2026 / وحدة 1)
 SYNC_DAYS_BACK = int(os.getenv("SYNC_DAYS_BACK", "14"))  # عدد أيام البحث للخلف في قاعدة البيانات
 
 TRACKER_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "invoices_tracker.db")
