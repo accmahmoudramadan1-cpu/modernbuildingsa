@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendWhatsAppTemplate, formatPhoneNumber } from "@/lib/whatsapp";
+import {
+  sendWhatsAppTemplate,
+  sendWhatsAppMessage,
+  formatPhoneNumber,
+} from "@/lib/whatsapp";
 import { updateInvoiceWhatsAppStatus } from "@/lib/oracle-invoices";
+import {
+  extractTemplateParameters,
+  formatTemplatePreviewText,
+  getOnyxTemplate,
+  type OnyxDocType,
+} from "@/lib/onyx-templates";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/whatsapp/send-invoice
- * Dispatches an approved WhatsApp Utility Template for an invoice imported from OraNT.
+ * Dispatches either an approved WhatsApp Utility Template or Direct Text
+ * using any of the 8 Onyx Pro ERP document templates.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -19,7 +30,12 @@ export async function POST(request: NextRequest) {
       amount,
       invoiceDate,
       currency = "ر.س",
-      templateName = process.env.WHATSAPP_INVOICE_TEMPLATE_NAME || "invoice_utility",
+      remainingBalance,
+      paymentMethod,
+      details,
+      docType = "cash_invoice",
+      sendMode = "template", // "template" | "text"
+      templateName,
       languageCode = process.env.WHATSAPP_INVOICE_TEMPLATE_LANG || "ar",
       customParameters,
       headerUrl,
@@ -27,37 +43,54 @@ export async function POST(request: NextRequest) {
 
     if (!invoiceNumber || !phone) {
       return NextResponse.json(
-        { success: false, error: "رقم الفاتورة ورقم الهاتف حقول مطلوبة." },
+        { success: false, error: "رقم المستند ورقم الهاتف حقول مطلوبة." },
         { status: 400 }
       );
     }
 
-    // Default parameters for standard invoice template:
-    // {{1}} = Customer Name
-    // {{2}} = Invoice Number
-    // {{3}} = Amount + Currency
-    // {{4}} = Date
+    const templateDef = getOnyxTemplate(docType);
+    const resolvedDocType: OnyxDocType = templateDef.id;
+    const resolvedTemplateName =
+      (templateName && String(templateName).trim()) ||
+      templateDef.defaultMetaTemplateName ||
+      process.env.WHATSAPP_INVOICE_TEMPLATE_NAME ||
+      "invoice_utility";
+
     const bodyParameters: string[] =
       Array.isArray(customParameters) && customParameters.length > 0
-        ? customParameters
-        : [
-            customerName || "عميلنا العزيز",
-            String(invoiceNumber),
-            `${amount || "0"} ${currency}`,
-            invoiceDate || new Date().toISOString().split("T")[0],
-          ];
+        ? customParameters.map((p: any) => String(p ?? "").trim())
+        : extractTemplateParameters(resolvedDocType, {
+            invoice_number: String(invoiceNumber),
+            customer_name: customerName || "عميلنا العزيز",
+            phone: String(phone),
+            invoice_date: invoiceDate || new Date().toISOString().split("T")[0],
+            amount: amount ?? "0",
+            currency,
+            remaining_balance: remainingBalance,
+            payment_method: paymentMethod,
+            details,
+            doc_type: resolvedDocType,
+          });
 
-    // Dispatch via Meta WhatsApp Cloud API
-    const result = await sendWhatsAppTemplate({
-      to: phone,
-      templateName,
-      languageCode,
-      bodyParameters,
-      headerUrl,
-    });
+    let result: { success: boolean; messageId?: string; error?: any; details?: any };
+
+    if (sendMode === "text") {
+      let fullText = formatTemplatePreviewText(resolvedDocType, bodyParameters);
+      if (headerUrl && String(headerUrl).trim()) {
+        fullText += `\n\nرابط المرفق:\n${String(headerUrl).trim()}`;
+      }
+      result = await sendWhatsAppMessage(phone, fullText);
+    } else {
+      result = await sendWhatsAppTemplate({
+        to: phone,
+        templateName: resolvedTemplateName,
+        languageCode,
+        bodyParameters,
+        headerUrl: headerUrl ? String(headerUrl).trim() : undefined,
+      });
+    }
 
     if (result.success) {
-      // Update status in storage/database
       await updateInvoiceWhatsAppStatus({
         invoiceNumber,
         status: "sent",
@@ -68,19 +101,27 @@ export async function POST(request: NextRequest) {
         success: true,
         messageId: result.messageId,
         recipient: formatPhoneNumber(phone),
-        message: "تم إرسال إشعار الفاتورة عبر واتساب بنجاح.",
+        docType: resolvedDocType,
+        sendMode,
+        message: `تم إرسال (${templateDef.label}) عبر واتساب بنجاح.`,
       });
     } else {
-      // Record failure
       await updateInvoiceWhatsAppStatus({
         invoiceNumber,
         status: "failed",
       });
 
+      const errorMessage =
+        typeof result.error === "string"
+          ? result.error
+          : result.error?.error?.message ||
+            result.error?.message ||
+            "فشل إرسال رسالة الواتساب عبر مزود الخدمة.";
+
       return NextResponse.json(
         {
           success: false,
-          error: result.error || "فشل إرسال رسالة الواتساب عبر مزود الخدمة.",
+          error: errorMessage,
           details: result,
         },
         { status: 502 }
@@ -89,7 +130,10 @@ export async function POST(request: NextRequest) {
   } catch (error: any) {
     console.error("[API /api/whatsapp/send-invoice] Error:", error);
     return NextResponse.json(
-      { success: false, error: error?.message || "حدث خطأ غير متوقع أثناء إرسال الفاتورة." },
+      {
+        success: false,
+        error: error?.message || "حدث خطأ غير متوقع أثناء إرسال المستند.",
+      },
       { status: 500 }
     );
   }

@@ -19,16 +19,33 @@ import {
   DoubleCheckIcon,
   CopyIcon,
   SearchIcon,
+  TagIcon,
+  PaperclipIcon,
+  FilterIcon,
 } from "./Icons";
+import {
+  ONYX_TEMPLATES,
+  ONYX_TEMPLATE_LIST,
+  extractTemplateParameters,
+  formatTemplatePreviewText,
+  getOnyxTemplate,
+  type OnyxDocType,
+} from "@/lib/onyx-templates";
 
 interface OracleInvoice {
   id: string;
   invoice_number: string;
+  doc_type: OnyxDocType;
+  customer_code?: string | null;
   customer_name: string;
   phone: string;
   invoice_date: string;
   amount: number | string;
   currency: string;
+  remaining_balance?: number | string | null;
+  payment_method?: string | null;
+  attachment_url?: string | null;
+  onyx_form_code?: string | null;
   details?: string;
   status: "pending" | "sent" | "failed";
   whatsapp_message_id?: string | null;
@@ -41,20 +58,27 @@ export default function WhatsAppInvoicesPage() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "sent" | "failed">("all");
+  const [docTypeFilter, setDocTypeFilter] = useState<"all" | OnyxDocType>("all");
 
-  // Modal states
+  // Send Modal states
   const [selectedInvoice, setSelectedInvoice] = useState<OracleInvoice | null>(null);
-  const [templateName, setTemplateName] = useState("invoice_utility");
+  const [activeDocType, setActiveDocType] = useState<OnyxDocType>("cash_invoice");
+  const [sendMode, setSendMode] = useState<"template" | "text">("template");
+  const [templateName, setTemplateName] = useState("cash_invoice");
   const [languageCode, setLanguageCode] = useState("ar");
-  const [param1, setParam1] = useState(""); // Customer Name
-  const [param2, setParam2] = useState(""); // Invoice Number
-  const [param3, setParam3] = useState(""); // Amount
-  const [param4, setParam4] = useState(""); // Date / Details
+  const [parameters, setParameters] = useState<string[]>([]);
+  const [headerUrl, setHeaderUrl] = useState("");
   const [sending, setSending] = useState(false);
-  const [actionMessage, setActionMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Script & Settings Modal
+  const [actionMessage, setActionMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+
+  // Script & Mock Modal states
   const [showScriptModal, setShowScriptModal] = useState(false);
+  const [showMockModal, setShowMockModal] = useState(false);
+  const [mockDocType, setMockDocType] = useState<OnyxDocType>("cash_invoice");
   const [copiedScript, setCopiedScript] = useState(false);
 
   // Load Invoices from API
@@ -69,13 +93,13 @@ export default function WhatsAppInvoicesPage() {
       } else {
         setActionMessage({
           type: "error",
-          text: data.error || "حدث خطأ أثناء تحميل الفواتير.",
+          text: data.error || "حدث خطأ أثناء تحميل المستندات.",
         });
       }
-    } catch (err: any) {
+    } catch {
       setActionMessage({
         type: "error",
-        text: "تعذر الاتصال بالخادم لجلب بيانات الفواتير.",
+        text: "تعذر الاتصال بالخادم لجلب بيانات المستندات.",
       });
     } finally {
       setLoading(false);
@@ -86,17 +110,37 @@ export default function WhatsAppInvoicesPage() {
     loadInvoices();
   }, []);
 
-  // Open Template Modal for an invoice
+  // Open Template Send Modal for a record
   function openSendModal(inv: OracleInvoice) {
+    const templateDef = getOnyxTemplate(inv.doc_type);
     setSelectedInvoice(inv);
-    setParam1(inv.customer_name || "عميلنا العزيز");
-    setParam2(inv.invoice_number);
-    setParam3(`${inv.amount} ${inv.currency || "ر.س"}`);
-    setParam4(inv.invoice_date || new Date().toISOString().split("T")[0]);
+    setActiveDocType(templateDef.id);
+    setTemplateName(templateDef.defaultMetaTemplateName);
+    setHeaderUrl(inv.attachment_url || "");
+    setParameters(extractTemplateParameters(templateDef.id, inv));
     setActionMessage(null);
   }
 
-  // Submit Template Send
+  // Switch template type inside modal
+  function handleModalDocTypeChange(newType: OnyxDocType) {
+    setActiveDocType(newType);
+    const templateDef = getOnyxTemplate(newType);
+    setTemplateName(templateDef.defaultMetaTemplateName);
+    if (selectedInvoice) {
+      setParameters(extractTemplateParameters(newType, selectedInvoice));
+    }
+  }
+
+  // Update a single variable value
+  function handleParamChange(index: number, value: string) {
+    setParameters((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      return next;
+    });
+  }
+
+  // Submit Send via API
   async function handleSendTemplate() {
     if (!selectedInvoice) return;
     setSending(true);
@@ -109,25 +153,31 @@ export default function WhatsAppInvoicesPage() {
         body: JSON.stringify({
           invoiceNumber: selectedInvoice.invoice_number,
           phone: selectedInvoice.phone,
-          customerName: param1,
-          amount: param3,
-          invoiceDate: param4,
+          customerName: selectedInvoice.customer_name,
+          amount: selectedInvoice.amount,
+          invoiceDate: selectedInvoice.invoice_date,
           currency: selectedInvoice.currency || "ر.س",
+          remainingBalance: selectedInvoice.remaining_balance,
+          paymentMethod: selectedInvoice.payment_method,
+          details: selectedInvoice.details,
+          docType: activeDocType,
+          sendMode,
           templateName: templateName.trim(),
           languageCode: languageCode.trim(),
-          customParameters: [param1, param2, param3, param4],
+          customParameters: parameters,
+          headerUrl: headerUrl.trim() || undefined,
         }),
       });
 
       const result = await res.json();
 
       if (res.ok && result.success) {
+        const label = getOnyxTemplate(activeDocType).label;
         setActionMessage({
           type: "success",
-          text: `تم إرسال فاتورة رقم (${selectedInvoice.invoice_number}) إلى ${selectedInvoice.phone} بنجاح!`,
+          text: `تم إرسال (${label}) رقم (${selectedInvoice.invoice_number}) إلى ${selectedInvoice.phone} بنجاح.`,
         });
 
-        // Update local state
         setInvoices((prev) =>
           prev.map((item) =>
             item.invoice_number === selectedInvoice.invoice_number
@@ -158,17 +208,109 @@ export default function WhatsAppInvoicesPage() {
     }
   }
 
-  // Quick Mock / Add Demo Invoice
-  async function handleAddMockInvoice() {
+  // Add Demo Record by selected Template Type
+  async function handleAddMockByType(typeToCreate: OnyxDocType) {
     const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const mockInv = {
-      invoice_number: `INV-2026-${randomNum}`,
-      customer_name: "مؤسسة الرواد للمقاولات",
-      phone: "0554303422",
-      amount: "3750.00",
+    const today = new Date().toISOString().split("T")[0];
+    const templateDef = getOnyxTemplate(typeToCreate);
+
+    const mockPayloads: Record<OnyxDocType, Partial<OracleInvoice>> = {
+      cash_invoice: {
+        invoice_number: `SI-C-${randomNum}`,
+        doc_type: "cash_invoice",
+        customer_code: "1025",
+        customer_name: "مؤسسة الرواد للمقاولات",
+        phone: "0554303422",
+        amount: "3750.00",
+        remaining_balance: "0.00",
+        payment_method: "نقداً",
+        onyx_form_code: "SI-CASH",
+        details: "فاتورة مبيعات نقدية تجريبية من نظام Onyx Pro",
+      },
+      credit_invoice: {
+        invoice_number: `SI-CR-${randomNum}`,
+        doc_type: "credit_invoice",
+        customer_code: "705",
+        customer_name: "يحيى عبدالله دكام الشريف",
+        phone: "0505726500",
+        amount: "2450.00",
+        remaining_balance: "11401.57",
+        payment_method: "آجل",
+        onyx_form_code: "SI-CREDIT",
+        details: "فاتورة مبيعات آجلة تجريبية مع الرصيد المتبقي",
+      },
+      receipt_voucher: {
+        invoice_number: `RV-${randomNum}`,
+        doc_type: "receipt_voucher",
+        customer_code: "7023",
+        customer_name: "محمد العباسي",
+        phone: "0554783338",
+        amount: "1200.00",
+        remaining_balance: "911.49",
+        payment_method: "تحويل بنكي",
+        onyx_form_code: "RV",
+        details: "سند قبض سداد من الحساب الآجل",
+      },
+      account_statement: {
+        invoice_number: `STMT-${randomNum}`,
+        doc_type: "account_statement",
+        customer_code: "702",
+        customer_name: "امين عيظة العكة",
+        phone: "0557653323",
+        amount: "338.88",
+        remaining_balance: "338.88",
+        onyx_form_code: "ALRTT002",
+        details: "كشف حساب ومطابقة عميل",
+      },
+      price_quotation: {
+        invoice_number: `QT-${randomNum}`,
+        doc_type: "price_quotation",
+        customer_code: "7047",
+        customer_name: "عبدالله يحيى صوان",
+        phone: "0557993232",
+        amount: "16800.00",
+        onyx_form_code: "QT",
+        details: "عرض سعر توريد مواد بناء",
+      },
+      purchase_order: {
+        invoice_number: `PO-${randomNum}`,
+        doc_type: "purchase_order",
+        customer_code: "SUP-118",
+        customer_name: "شركة مصانع الدهانات الوطنية",
+        phone: "0501960009",
+        amount: "19200.00",
+        onyx_form_code: "PO",
+        details: "طلب شراء أصناف دهانات وبرايمر للمورد",
+      },
+      customer_discount_notice: {
+        invoice_number: `260100${randomNum}`,
+        doc_type: "customer_discount_notice",
+        customer_code: "70714",
+        customer_name: "قاسم حسن المؤيد",
+        phone: "0554303422",
+        amount: "197.48",
+        remaining_balance: "3473.02",
+        payment_method: "خصم سداد",
+        onyx_form_code: "ARST045",
+        details: "إشعار خصم عميل متعدد من شاشة ARST045",
+      },
+      direct_alert: {
+        invoice_number: `ALRT-${randomNum}`,
+        doc_type: "direct_alert",
+        customer_code: "703",
+        customer_name: "مؤسسة المصباح المميز التجارية",
+        phone: "0550408666",
+        amount: "5283.08",
+        remaining_balance: "5283.08",
+        onyx_form_code: "ALRTT002",
+        details: "برجاء سداد المبالغ المستحقة - البناء الحديث",
+      },
+    };
+
+    const payload = {
+      ...mockPayloads[typeToCreate],
       currency: "ر.س",
-      invoice_date: new Date().toISOString().split("T")[0],
-      details: "توريد دهانات ومواد عزل من نظام OraNT",
+      invoice_date: today,
       status: "pending",
     };
 
@@ -176,35 +318,48 @@ export default function WhatsAppInvoicesPage() {
       const res = await fetch("/api/oracle-orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(mockInv),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
-        loadInvoices();
+        setShowMockModal(false);
+        await loadInvoices();
         setActionMessage({
           type: "success",
-          text: `تمت إضافة فاتورة تجريبية رقم (${mockInv.invoice_number}) بنجاح!`,
+          text: `تمت إضافة (${templateDef.label}) تجريبي برقم (${payload.invoice_number}) بنجاح.`,
         });
       }
-    } catch (e) {}
+    } catch {
+      setActionMessage({
+        type: "error",
+        text: "تعذر إضافة العملية التجريبية.",
+      });
+    }
   }
 
   // Filter & Search
   const filteredInvoices = invoices.filter((item) => {
+    const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
-      item.invoice_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.customer_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.phone.includes(searchQuery);
+      !q ||
+      item.invoice_number.toLowerCase().includes(q) ||
+      item.customer_name.toLowerCase().includes(q) ||
+      (item.customer_code || "").toLowerCase().includes(q) ||
+      item.phone.includes(q);
 
-    const matchesStatus =
-      statusFilter === "all" ? true : item.status === statusFilter;
+    const matchesStatus = statusFilter === "all" ? true : item.status === statusFilter;
+    const matchesDocType =
+      docTypeFilter === "all" ? true : (item.doc_type || "cash_invoice") === docTypeFilter;
 
-    return matchesSearch && matchesStatus;
+    return matchesSearch && matchesStatus && matchesDocType;
   });
 
   const totalCount = invoices.length;
   const pendingCount = invoices.filter((i) => i.status === "pending").length;
   const sentCount = invoices.filter((i) => i.status === "sent").length;
   const failedCount = invoices.filter((i) => i.status === "failed").length;
+
+  const activeTemplateDef = getOnyxTemplate(activeDocType);
+  const livePreviewText = formatTemplatePreviewText(activeDocType, parameters);
 
   return (
     <main dir="rtl" className="min-h-screen bg-[#f5f5f3] px-4 py-8 sm:px-6 lg:px-10">
@@ -218,10 +373,10 @@ export default function WhatsAppInvoicesPage() {
               </span>
               <div>
                 <h1 className="text-2xl font-black text-gray-900 sm:text-3xl">
-                  إدارة فواتير واتساب (OraNT / OnyxPro)
+                  بوابة واتساب نظام أونكس (Onyx Pro / OraNT)
                 </h1>
                 <p className="text-sm font-semibold text-gray-500">
-                  استيراد الفواتير من نظام أوراكل وإرسال إشعارات رسمية بقوالب Utility
+                  استقبال الفواتير، سندات القبض، كشوف الحساب، عروض الأسعار، طلبات الشراء وإشعارات العملاء
                 </p>
               </div>
             </div>
@@ -237,11 +392,11 @@ export default function WhatsAppInvoicesPage() {
             </button>
 
             <button
-              onClick={handleAddMockInvoice}
+              onClick={() => setShowMockModal(true)}
               className="flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-bold text-orange-700 transition hover:bg-orange-100"
             >
               <PlusIcon className="h-4 w-4 text-orange-600" />
-              <span>إضافة فاتورة للتجربة</span>
+              <span>إضافة عملية للتجربة</span>
             </button>
 
             <button
@@ -250,7 +405,7 @@ export default function WhatsAppInvoicesPage() {
               className="flex items-center gap-2 rounded-xl bg-black px-5 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-orange-600 disabled:opacity-50"
             >
               <RefreshIcon className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-              <span>{loading ? "جاري التحديث..." : "تحديث الفواتير"}</span>
+              <span>{loading ? "جاري التحديث..." : "تحديث البيانات"}</span>
             </button>
           </div>
         </div>
@@ -265,9 +420,9 @@ export default function WhatsAppInvoicesPage() {
             }`}
           >
             {actionMessage.type === "success" ? (
-              <CheckCircleIcon className="h-5 w-5 text-green-600 shrink-0" />
+              <CheckCircleIcon className="h-5 w-5 shrink-0 text-green-600" />
             ) : (
-              <AlertCircleIcon className="h-5 w-5 text-red-600 shrink-0" />
+              <AlertCircleIcon className="h-5 w-5 shrink-0 text-red-600" />
             )}
             <span>{actionMessage.text}</span>
           </div>
@@ -276,15 +431,15 @@ export default function WhatsAppInvoicesPage() {
         {/* Statistics Cards */}
         <div className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="rounded-3xl bg-white p-5 shadow-sm">
-            <p className="text-xs font-bold text-gray-400">إجمالي الفواتير المستوردة</p>
+            <p className="text-xs font-bold text-gray-400">إجمالي المستندات المستوردة</p>
             <p className="mt-2 text-3xl font-black text-gray-900">{totalCount}</p>
-            <p className="mt-1 text-xs text-gray-500">من نظام أوراكل OraNT</p>
+            <p className="mt-1 text-xs text-gray-500">من شاشات Onyx Pro ERP</p>
           </div>
 
           <div className="rounded-3xl bg-white p-5 shadow-sm">
             <p className="text-xs font-bold text-amber-500">بانتظار الإرسال</p>
             <p className="mt-2 text-3xl font-black text-amber-600">{pendingCount}</p>
-            <p className="mt-1 text-xs text-gray-500">جاهزة لإرسال الواتساب</p>
+            <p className="mt-1 text-xs text-gray-500">جاهزة للإرسال بالواتساب</p>
           </div>
 
           <div className="rounded-3xl bg-white p-5 shadow-sm">
@@ -300,13 +455,60 @@ export default function WhatsAppInvoicesPage() {
           </div>
         </div>
 
-        {/* Filter & Search Bar */}
-        <div className="mt-8 flex flex-col gap-4 rounded-3xl bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        {/* Document Type (Template) Filter Bar */}
+        <div className="mt-6 rounded-3xl bg-white p-4 shadow-sm">
+          <div className="mb-3 flex items-center gap-2 text-xs font-black text-gray-500">
+            <TagIcon className="h-4 w-4 text-orange-500" />
+            <span>تصفية حسب نوع القالب / شاشة أونكس:</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setDocTypeFilter("all")}
+              className={`rounded-xl px-3.5 py-2 text-xs font-black transition ${
+                docTypeFilter === "all"
+                  ? "bg-black text-white shadow-sm"
+                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+              }`}
+            >
+              جميع القوالب ({totalCount})
+            </button>
+            {ONYX_TEMPLATE_LIST.map((tpl) => {
+              const count = invoices.filter(
+                (i) => (i.doc_type || "cash_invoice") === tpl.id
+              ).length;
+              return (
+                <button
+                  key={tpl.id}
+                  onClick={() => setDocTypeFilter(tpl.id)}
+                  className={`flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition ${
+                    docTypeFilter === tpl.id
+                      ? "bg-orange-600 text-white shadow-sm"
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  <span>{tpl.shortLabel}</span>
+                  <span
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-black ${
+                      docTypeFilter === tpl.id
+                        ? "bg-white/20 text-white"
+                        : "bg-white text-gray-500"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Search & Status Filter Bar */}
+        <div className="mt-4 flex flex-col gap-4 rounded-3xl bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
           <div className="relative flex-1">
             <SearchIcon className="absolute right-4 top-3.5 h-4 w-4 text-gray-400" />
             <input
               type="text"
-              placeholder="ابحث برقم الفاتورة، اسم العميل، أو رقم الهاتف..."
+              placeholder="ابحث برقم المستند، كود العميل، اسم العميل/المورد، أو رقم الجوال..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full rounded-2xl border border-gray-200 bg-[#f8f8f6] py-3 pr-11 pl-4 text-sm font-bold text-gray-800 outline-none focus:border-orange-500 focus:bg-white"
@@ -314,6 +516,7 @@ export default function WhatsAppInvoicesPage() {
           </div>
 
           <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+            <FilterIcon className="ml-1 hidden h-4 w-4 text-gray-400 sm:block" />
             <button
               onClick={() => setStatusFilter("all")}
               className={`rounded-xl px-4 py-2.5 text-xs font-black transition ${
@@ -357,19 +560,19 @@ export default function WhatsAppInvoicesPage() {
           </div>
         </div>
 
-        {/* Invoices List / Table */}
+        {/* Documents List / Table */}
         <div className="mt-6 overflow-hidden rounded-3xl bg-white shadow-sm">
           {loading ? (
             <div className="py-20 text-center">
               <div className="inline-block h-8 w-8 animate-spin rounded-full border-4 border-orange-500 border-t-transparent"></div>
-              <p className="mt-4 font-bold text-gray-500">جاري تحميل الفواتير...</p>
+              <p className="mt-4 font-bold text-gray-500">جاري تحميل العمليات...</p>
             </div>
           ) : filteredInvoices.length === 0 ? (
             <div className="py-20 text-center">
               <InvoiceDocumentIcon className="mx-auto h-16 w-16 text-gray-300" />
-              <h3 className="mt-4 text-lg font-black text-gray-800">لا توجد فواتير مطابقة</h3>
+              <h3 className="mt-4 text-lg font-black text-gray-800">لا توجد عمليات مطابقة</h3>
               <p className="mt-1 text-sm text-gray-500">
-                تأكد من تشغيل سكربت استيراد الفواتير على جهاز OraNT أو أضف فاتورة للتجربة.
+                تأكد من تشغيل سكربت المزامنة على جهاز OraNT أو أضف عملية تجريبية للاختبار.
               </p>
             </div>
           ) : (
@@ -377,76 +580,120 @@ export default function WhatsAppInvoicesPage() {
               <table className="w-full text-right">
                 <thead className="border-b border-gray-100 bg-gray-50/70 text-xs font-black text-gray-500">
                   <tr>
-                    <th className="px-6 py-4">رقم الفاتورة</th>
-                    <th className="px-6 py-4">اسم العميل</th>
-                    <th className="px-6 py-4">رقم الجوال</th>
-                    <th className="px-6 py-4">المبلغ</th>
-                    <th className="px-6 py-4">تاريخ الفاتورة</th>
-                    <th className="px-6 py-4">حالة الإرسال</th>
-                    <th className="px-6 py-4 text-center">الإجراءات</th>
+                    <th className="px-5 py-4">رقم المستند</th>
+                    <th className="px-5 py-4">نوع القالب / الشاشة</th>
+                    <th className="px-5 py-4">العميل / المورد</th>
+                    <th className="px-5 py-4">رقم الجوال</th>
+                    <th className="px-5 py-4">المبلغ والرصيد</th>
+                    <th className="px-5 py-4">التاريخ</th>
+                    <th className="px-5 py-4">الحالة</th>
+                    <th className="px-5 py-4 text-center">الإجراءات</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100 text-sm">
-                  {filteredInvoices.map((inv) => (
-                    <tr key={inv.id} className="transition hover:bg-gray-50/50">
-                      <td className="px-6 py-4 font-black text-gray-900">
-                        {inv.invoice_number}
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="font-bold text-gray-900">{inv.customer_name}</p>
-                        {inv.details && (
-                          <p className="text-xs text-gray-400 line-clamp-1">{inv.details}</p>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 font-mono font-bold text-gray-700" dir="ltr">
-                        {inv.phone}
-                      </td>
-                      <td className="px-6 py-4 font-black text-orange-600">
-                        {inv.amount} {inv.currency || "ر.س"}
-                      </td>
-                      <td className="px-6 py-4 text-xs font-semibold text-gray-500">
-                        {inv.invoice_date}
-                      </td>
-                      <td className="px-6 py-4">
-                        {inv.status === "sent" ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
-                            <span className="h-2 w-2 rounded-full bg-green-500"></span>
-                            تم الإرسال
-                          </span>
-                        ) : inv.status === "failed" ? (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
-                            <span className="h-2 w-2 rounded-full bg-red-500"></span>
-                            فشل الإرسال
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
-                            <span className="h-2 w-2 rounded-full bg-amber-500"></span>
-                            بانتظار الإرسال
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <div className="flex items-center justify-center gap-2">
-                          <button
-                            onClick={() => openSendModal(inv)}
-                            className="flex items-center gap-1.5 rounded-xl bg-green-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:bg-green-700 active:scale-95"
+                  {filteredInvoices.map((inv) => {
+                    const tpl = getOnyxTemplate(inv.doc_type);
+                    return (
+                      <tr key={inv.id} className="transition hover:bg-gray-50/50">
+                        <td className="px-5 py-4">
+                          <p className="font-mono font-black text-gray-900" dir="ltr">
+                            {inv.invoice_number}
+                          </p>
+                          {inv.customer_code && (
+                            <p className="mt-0.5 text-[11px] font-bold text-gray-400">
+                              كود: {inv.customer_code}
+                            </p>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-xl border px-2.5 py-1 text-[11px] font-black ${tpl.badgeColor}`}
                           >
-                            <WhatsAppIcon className="h-3.5 w-3.5 fill-current" />
-                            <span>إرسال فاتورة واتساب</span>
-                          </button>
-                          <a
-                            href={`https://wa.me/${inv.phone.replace(/\D/g, "")}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2 text-gray-600 transition hover:bg-gray-100"
-                            title="فتح محادثة واتساب عادية"
-                          >
-                            <ExternalLinkIcon className="h-3.5 w-3.5" />
-                          </a>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {tpl.shortLabel}
+                          </span>
+                          <p className="mt-1 font-mono text-[10px] font-bold text-gray-400">
+                            {inv.onyx_form_code || tpl.onyxScreenCode}
+                          </p>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <p className="font-bold text-gray-900">{inv.customer_name}</p>
+                          {inv.details && (
+                            <p className="mt-0.5 text-xs text-gray-400 line-clamp-1">
+                              {inv.details}
+                            </p>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4 font-mono font-bold text-gray-700" dir="ltr">
+                          {inv.phone}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <p className="font-black text-orange-600">
+                            {inv.amount} {inv.currency || "ر.س"}
+                          </p>
+                          {inv.remaining_balance !== undefined &&
+                            inv.remaining_balance !== null &&
+                            String(inv.remaining_balance).trim() !== "" && (
+                              <p className="mt-0.5 text-[11px] font-bold text-gray-500">
+                                الرصيد: {inv.remaining_balance} {inv.currency || "ر.س"}
+                              </p>
+                            )}
+                          {inv.payment_method && (
+                            <p className="mt-0.5 text-[10px] font-semibold text-gray-400">
+                              {inv.payment_method}
+                            </p>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4 text-xs font-semibold text-gray-500">
+                          {inv.invoice_date}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          {inv.status === "sent" ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-3 py-1 text-xs font-bold text-green-700">
+                              <span className="h-2 w-2 rounded-full bg-green-500"></span>
+                              تم الإرسال
+                            </span>
+                          ) : inv.status === "failed" ? (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+                              <span className="h-2 w-2 rounded-full bg-red-500"></span>
+                              فشل الإرسال
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
+                              <span className="h-2 w-2 rounded-full bg-amber-500"></span>
+                              بانتظار الإرسال
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => openSendModal(inv)}
+                              className="flex items-center gap-1.5 rounded-xl bg-green-600 px-3.5 py-2 text-xs font-black text-white shadow-sm transition hover:bg-green-700 active:scale-95"
+                            >
+                              <WhatsAppIcon className="h-3.5 w-3.5 fill-current" />
+                              <span>إرسال</span>
+                            </button>
+                            <a
+                              href={`https://wa.me/${inv.phone.replace(/\D/g, "")}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-center rounded-xl border border-gray-200 bg-white p-2 text-gray-600 transition hover:bg-gray-100"
+                              title="فتح محادثة واتساب عادية"
+                            >
+                              <ExternalLinkIcon className="h-3.5 w-3.5" />
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -455,7 +702,7 @@ export default function WhatsAppInvoicesPage() {
 
         {/* Footer info */}
         <div className="mt-8 flex flex-col items-center justify-between gap-4 text-xs font-bold text-gray-400 sm:flex-row">
-          <p>نظام إشعارات فواتير البناء الحديث © 2026</p>
+          <p>نظام إشعارات فواتير وعمليات البناء الحديث © 2026</p>
           <Link href="/" className="hover:text-orange-600">
             العودة للمتجر الرئيسي
           </Link>
@@ -465,7 +712,7 @@ export default function WhatsAppInvoicesPage() {
       {/* --- MODAL: Send Template Dialog --- */}
       {selectedInvoice && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-2xl overflow-hidden rounded-3xl bg-white shadow-2xl">
+          <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-gray-100 bg-[#fbfbfa] px-6 py-5">
               <div className="flex items-center gap-3">
@@ -474,10 +721,10 @@ export default function WhatsAppInvoicesPage() {
                 </span>
                 <div>
                   <h3 className="text-lg font-black text-gray-900">
-                    إرسال إشعار الفاتورة عبر قالب واتساب رسمي
+                    إرسال إشعار واتساب ({activeTemplateDef.label})
                   </h3>
                   <p className="text-xs font-bold text-gray-500">
-                    فاتورة رقم {selectedInvoice.invoice_number} إلى العميل ({selectedInvoice.customer_name})
+                    مستند رقم {selectedInvoice.invoice_number} — {selectedInvoice.customer_name}
                   </p>
                 </div>
               </div>
@@ -494,112 +741,131 @@ export default function WhatsAppInvoicesPage() {
               <div className="grid gap-6 md:grid-cols-2">
                 {/* Left: Template Settings & Variables */}
                 <div className="space-y-4">
+                  {/* Template Type Selector */}
                   <div>
                     <label className="text-xs font-black text-gray-700">
-                      اسم القالب المعتمد (Template Name):
+                      نوع القالب (مطابق لقوالب Word / Onyx):
                     </label>
-                    <input
-                      type="text"
-                      value={templateName}
-                      onChange={(e) => setTemplateName(e.target.value)}
-                      placeholder="e.g. invoice_utility"
-                      className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 font-mono text-xs font-bold outline-none focus:border-green-600"
-                    />
-                    <p className="mt-1 text-[11px] text-gray-400">
-                      اسم القالب كما هو مسجل ومعتمد في Meta WhatsApp Manager.
-                    </p>
+                    <select
+                      value={activeDocType}
+                      onChange={(e) => handleModalDocTypeChange(e.target.value as OnyxDocType)}
+                      className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-bold text-gray-800 outline-none focus:border-green-600"
+                    >
+                      {ONYX_TEMPLATE_LIST.map((tpl) => (
+                        <option key={tpl.id} value={tpl.id}>
+                          {tpl.label} ({tpl.onyxScreenCode})
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs font-black text-gray-700">
-                        لغة القالب:
-                      </label>
-                      <input
-                        type="text"
-                        value={languageCode}
-                        onChange={(e) => setLanguageCode(e.target.value)}
-                        placeholder="ar"
-                        className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2.5 text-xs font-bold outline-none focus:border-green-600"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs font-black text-gray-700">
-                        رقم هاتف المستلم:
-                      </label>
-                      <input
-                        type="text"
-                        disabled
-                        value={selectedInvoice.phone}
-                        className="mt-1.5 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-xs font-bold text-gray-600"
-                        dir="ltr"
-                      />
+                  {/* Send Mode Toggle */}
+                  <div>
+                    <label className="text-xs font-black text-gray-700">طريقة الإرسال:</label>
+                    <div className="mt-1.5 grid grid-cols-2 gap-2 rounded-xl bg-gray-100 p-1">
+                      <button
+                        type="button"
+                        onClick={() => setSendMode("template")}
+                        className={`rounded-lg py-2 text-xs font-black transition ${
+                          sendMode === "template"
+                            ? "bg-white text-green-700 shadow-sm"
+                            : "text-gray-500 hover:text-gray-800"
+                        }`}
+                      >
+                        قالب Utility رسمي
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setSendMode("text")}
+                        className={`rounded-lg py-2 text-xs font-black transition ${
+                          sendMode === "text"
+                            ? "bg-white text-orange-600 shadow-sm"
+                            : "text-gray-500 hover:text-gray-800"
+                        }`}
+                      >
+                        رسالة نصية مباشرة
+                      </button>
                     </div>
                   </div>
 
-                  {/* Variables */}
+                  {sendMode === "template" && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="col-span-2">
+                        <label className="text-xs font-black text-gray-700">
+                          اسم القالب في Meta:
+                        </label>
+                        <input
+                          type="text"
+                          value={templateName}
+                          onChange={(e) => setTemplateName(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 font-mono text-xs font-bold outline-none focus:border-green-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-black text-gray-700">اللغة:</label>
+                        <input
+                          type="text"
+                          value={languageCode}
+                          onChange={(e) => setLanguageCode(e.target.value)}
+                          className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 text-xs font-bold outline-none focus:border-green-600"
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Dynamic Variables for Selected Template */}
                   <div className="rounded-2xl border border-gray-100 bg-[#f9f9f8] p-4">
                     <p className="text-xs font-black text-gray-800">
-                      متغيرات القالب التلقائية (Variables):
+                      متغيرات القالب ({activeTemplateDef.variables.length} متغيرات):
                     </p>
 
                     <div className="mt-3 space-y-3">
-                      <div>
-                        <span className="text-[11px] font-bold text-gray-500">
-                          {"{{1}}"} اسم العميل:
-                        </span>
-                        <input
-                          type="text"
-                          value={param1}
-                          onChange={(e) => setParam1(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-orange-500"
-                        />
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] font-bold text-gray-500">
-                          {"{{2}}"} رقم الفاتورة:
-                        </span>
-                        <input
-                          type="text"
-                          value={param2}
-                          onChange={(e) => setParam2(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-orange-500"
-                        />
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] font-bold text-gray-500">
-                          {"{{3}}"} المبلغ الإجمالي:
-                        </span>
-                        <input
-                          type="text"
-                          value={param3}
-                          onChange={(e) => setParam3(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-orange-500"
-                        />
-                      </div>
-
-                      <div>
-                        <span className="text-[11px] font-bold text-gray-500">
-                          {"{{4}}"} تاريخ الفاتورة:
-                        </span>
-                        <input
-                          type="text"
-                          value={param4}
-                          onChange={(e) => setParam4(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-orange-500"
-                        />
-                      </div>
+                      {activeTemplateDef.variables.map((v, idx) => (
+                        <div key={v.key + idx}>
+                          <span className="text-[11px] font-bold text-gray-500">
+                            {`{{${v.index}}}`} {v.label}:
+                          </span>
+                          <input
+                            type="text"
+                            value={parameters[idx] ?? ""}
+                            onChange={(e) => handleParamChange(idx, e.target.value)}
+                            placeholder={v.placeholder}
+                            className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-bold outline-none focus:border-orange-500"
+                          />
+                        </div>
+                      ))}
                     </div>
                   </div>
+
+                  {/* Optional Attachment PDF Link */}
+                  {activeTemplateDef.hasAttachment && (
+                    <div>
+                      <label className="flex items-center gap-1.5 text-xs font-black text-gray-700">
+                        <PaperclipIcon className="h-3.5 w-3.5 text-gray-500" />
+                        <span>رابط مرفق PDF (اختياري):</span>
+                      </label>
+                      <input
+                        type="url"
+                        value={headerUrl}
+                        onChange={(e) => setHeaderUrl(e.target.value)}
+                        placeholder="https://modernbuildingsa.com/files/doc.pdf"
+                        className="mt-1.5 w-full rounded-xl border border-gray-200 px-3 py-2 font-mono text-xs outline-none focus:border-green-600"
+                        dir="ltr"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Right: Live WhatsApp Phone Preview */}
                 <div>
-                  <label className="text-xs font-black text-gray-700">
-                    معاينة شكل الرسالة لدى العميل:
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-black text-gray-700">
+                      معاينة الرسالة المطابقة لقالب Word:
+                    </label>
+                    <span className="font-mono text-[11px] font-bold text-gray-500" dir="ltr">
+                      {selectedInvoice.phone}
+                    </span>
+                  </div>
 
                   <div className="mt-2 rounded-3xl border border-gray-200 bg-[#efeae2] p-4 shadow-inner">
                     {/* Simulated WhatsApp Chat Bubble */}
@@ -610,39 +876,42 @@ export default function WhatsAppInvoicesPage() {
                           <p className="text-xs font-black text-green-700">
                             مؤسسة البناء الحديث
                           </p>
-                          <p className="text-[10px] text-gray-400">إشعار فاتورة إلكترونية</p>
+                          <p className="text-[10px] text-gray-400">
+                            {activeTemplateDef.label}
+                          </p>
                         </div>
                       </div>
 
-                      <div className="mt-3 space-y-2 text-xs leading-relaxed text-gray-800">
-                        <p>
-                          مرحباً <span className="font-bold text-gray-900">{param1 || "العميل"}</span>
-                        </p>
-                        <p>
-                          تم إصدار فاتورتكم رقم{" "}
-                          <span className="font-bold text-orange-600">{param2}</span>.
-                        </p>
-                        <p>
-                          المبلغ الإجمالي المستحق:{" "}
-                          <span className="font-black text-gray-900">{param3}</span>
-                        </p>
-                        <p className="text-[11px] text-gray-500">
-                          تاريخ الإصدار: {param4}
-                        </p>
-                        <p className="text-[11px] text-gray-600">
-                          شكراً لتعاملكم مع مؤسسة البناء الحديث.
-                        </p>
+                      {headerUrl.trim() && (
+                        <div className="mt-3 flex items-center gap-2 rounded-xl border border-gray-100 bg-gray-50 p-2.5 text-[11px] font-bold text-gray-700">
+                          <PaperclipIcon className="h-4 w-4 text-orange-600" />
+                          <span className="truncate">مرفق PDF: {selectedInvoice.invoice_number}.pdf</span>
+                        </div>
+                      )}
+
+                      <div className="mt-3 whitespace-pre-line text-xs leading-6 text-gray-800">
+                        {livePreviewText}
                       </div>
 
-                      <div className="mt-3 flex items-center justify-end gap-1 text-[10px] text-gray-400" dir="ltr">
-                        <span>{new Date().toLocaleTimeString("ar-EG", { hour: "2-digit", minute: "2-digit" })}</span>
+                      <div
+                        className="mt-3 flex items-center justify-end gap-1 text-[10px] text-gray-400"
+                        dir="ltr"
+                      >
+                        <span>
+                          {new Date().toLocaleTimeString("ar-EG", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
                         <DoubleCheckIcon className="h-3.5 w-3.5 text-blue-500" />
                       </div>
                     </div>
 
                     <div className="mt-3 text-center">
                       <span className="inline-block rounded-full bg-black/10 px-3 py-1 text-[10px] font-bold text-gray-600">
-                        قالب Utility رسمي عبر Meta Cloud API
+                        {sendMode === "template"
+                          ? `قالب Utility رسمي (${templateName})`
+                          : "رسالة نصية مباشرة (داخل نافذة 24 ساعة)"}
                       </span>
                     </div>
                   </div>
@@ -672,9 +941,72 @@ export default function WhatsAppInvoicesPage() {
                 ) : (
                   <>
                     <SendPlaneIcon className="h-4 w-4" />
-                    <span>إرسال الفاتورة عبر واتساب الآن</span>
+                    <span>إرسال عبر واتساب الآن</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: Pick Mock Document Type --- */}
+      {showMockModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-gray-100 bg-[#fbfbfa] px-6 py-5">
+              <div className="flex items-center gap-2.5">
+                <PlusIcon className="h-5 w-5 text-orange-600" />
+                <h3 className="text-base font-black text-gray-900">
+                  إضافة عملية تجريبية من قوالب أونكس
+                </h3>
+              </div>
+              <button
+                onClick={() => setShowMockModal(false)}
+                className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+              >
+                <CloseIcon className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <p className="text-xs font-bold text-gray-500">
+                اختر نوع القالب المطلوب إنشاء عملية تجريبية له في القائمة:
+              </p>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                {ONYX_TEMPLATE_LIST.map((tpl) => (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    onClick={() => setMockDocType(tpl.id)}
+                    className={`rounded-2xl border p-3 text-right transition ${
+                      mockDocType === tpl.id
+                        ? "border-orange-500 bg-orange-50 text-orange-900"
+                        : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    <p className="text-xs font-black">{tpl.label}</p>
+                    <p className="mt-1 font-mono text-[10px] font-bold text-gray-400">
+                      {tpl.onyxScreenCode}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between border-t border-gray-100 bg-[#fbfbfa] px-6 py-4">
+              <button
+                onClick={() => setShowMockModal(false)}
+                className="rounded-xl px-4 py-2 text-xs font-bold text-gray-500 hover:bg-gray-100"
+              >
+                إلغاء
+              </button>
+              <button
+                onClick={() => handleAddMockByType(mockDocType)}
+                className="rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-black text-white shadow-sm hover:bg-orange-700"
+              >
+                إضافة العملية التجريبية
               </button>
             </div>
           </div>
@@ -692,10 +1024,10 @@ export default function WhatsAppInvoicesPage() {
                 </span>
                 <div>
                   <h3 className="text-lg font-black text-gray-900">
-                    ربط السكربت الخارجي لنظام أوراكل (OraNT)
+                    ربط السكربت الخارجي لنظام أونكس برو (OraNT / Onyx Pro)
                   </h3>
                   <p className="text-xs font-bold text-gray-500">
-                    خطوات تشغيل السكربت على جهاز أوراكل لإرسال الفواتير إلى الموقع تلقائياً
+                    التقاط القيم من جميع شاشات أونكس (الفواتير، السندات، ALRTT002، ARST045، عروض الأسعار)
                   </p>
                 </div>
               </div>
@@ -711,21 +1043,29 @@ export default function WhatsAppInvoicesPage() {
               <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
                 <div className="flex items-center gap-2 font-black text-blue-900">
                   <InfoCircleIcon className="h-4 w-4 text-blue-600" />
-                  <h4>كيف يعمل الربط؟</h4>
+                  <h4>كيف يعمل الربط الشامل مع Onyx Pro؟</h4>
                 </div>
                 <ol className="mt-2 list-decimal pr-5 space-y-1 text-xs text-blue-800 leading-relaxed font-semibold">
-                  <li>السكربت الخارجي يعمل على الجهاز المثبت عليه أوراكل / OraNT بحساب يملك صلاحية قراءة.</li>
-                  <li>يستخرج الفواتير الجديدة (رقم الفاتورة، العميل، الهاتف، المبلغ، التاريخ).</li>
-                  <li>يرسلها عبر رابط الـ API المشفر (HTTPS) إلى هذا الموقع لتظهر فوراً في هذه الصفحة.</li>
-                  <li>من هذه الصفحة يمكنك إرسال إشعارات الفواتير عبر قوالب Utility الرسمية بنقرة زر واحدة!</li>
+                  <li>
+                    السكربت يتصل بقاعدة بيانات Oracle (`onyxserver:1521/orcl`) بحساب القراءة فقط.
+                  </li>
+                  <li>
+                    يلتقط تلقائياً: الفواتير النقدية والآجلة، سندات القبض، تنبيهات شاشة `ALRTT002`، إشعارات خصم العملاء `ARST045`، عروض الأسعار وطلبات الشراء.
+                  </li>
+                  <li>
+                    يرسل القيم مصنفة بنوع القالب (`doc_type`) إلى الموقع لتظهر مع متغيراتها جاهزة للإرسال الفوري.
+                  </li>
                 </ol>
               </div>
 
               <div>
                 <p className="text-xs font-black text-gray-700">
-                  رابط الـ API المستقبل للفواتير (Endpoint):
+                  رابط الـ API المستقبل للعمليات (Endpoint):
                 </p>
-                <div className="mt-1.5 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 font-mono text-xs font-bold text-gray-800" dir="ltr">
+                <div
+                  className="mt-1.5 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 font-mono text-xs font-bold text-gray-800"
+                  dir="ltr"
+                >
                   <span>https://modernbuildingsa.com/api/oracle-orders</span>
                 </div>
               </div>
@@ -733,12 +1073,12 @@ export default function WhatsAppInvoicesPage() {
               <div>
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-black text-gray-700">
-                    ملف السكربت الجاهز (Python):
+                    أوامر تشغيل واكتشاف جداول أونكس (Python):
                   </p>
                   <button
                     onClick={() => {
                       navigator.clipboard.writeText(
-                        `# مسار الملف موجود في: scripts/sync_orant_invoices.py داخل المشروع`
+                        `python scripts/sync_orant_invoices.py --discover`
                       );
                       setCopiedScript(true);
                       setTimeout(() => setCopiedScript(false), 3000);
@@ -748,22 +1088,26 @@ export default function WhatsAppInvoicesPage() {
                     {copiedScript ? (
                       <>
                         <CheckCircleIcon className="h-3.5 w-3.5 text-green-600" />
-                        <span>تم النسخ!</span>
+                        <span>تم النسخ</span>
                       </>
                     ) : (
                       <>
                         <CopyIcon className="h-3.5 w-3.5" />
-                        <span>نسخ مسار الملف</span>
+                        <span>نسخ أمر الاكتشاف</span>
                       </>
                     )}
                   </button>
                 </div>
-                <div className="mt-2 rounded-2xl bg-gray-900 p-4 font-mono text-xs text-green-400" dir="ltr">
-                  <p># لتشغيل السكربت على جهاز OraNT:</p>
-                  <p className="text-white mt-1">pip install oracledb requests</p>
-                  <p className="text-white mt-1">python scripts/sync_orant_invoices.py --mock</p>
-                  <p className="text-gray-400 mt-2"># أو للتشغيل مع قاعدة بيانات أوراكل الحية:</p>
-                  <p className="text-white">python scripts/sync_orant_invoices.py</p>
+                <div
+                  className="mt-2 rounded-2xl bg-gray-900 p-4 font-mono text-xs text-green-400 space-y-1.5"
+                  dir="ltr"
+                >
+                  <p className="text-gray-400"># 1. اكتشاف أسماء جداول أونكس الفعلية على السيرفر:</p>
+                  <p className="text-white">python scripts/sync_orant_invoices.py --discover</p>
+                  <p className="text-gray-400 pt-2"># 2. اختبار إرسال جميع القوالب الـ 8 (وضع التجربة):</p>
+                  <p className="text-white">python scripts/sync_orant_invoices.py --mock</p>
+                  <p className="text-gray-400 pt-2"># 3. التشغيل المستمر في الخلفية:</p>
+                  <p className="text-white">python scripts/sync_orant_invoices.py --loop 60</p>
                 </div>
               </div>
             </div>
