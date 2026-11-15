@@ -441,8 +441,8 @@ def clean_phone_number(raw_phone: str) -> str:
     return digits
 
 
-def _init_thick_mode(oracledb) -> bool:
-    """تفعيل Thick Mode في مكتبة oracledb عند الاتصال بقواعد بيانات Oracle 11g أو الأقدم"""
+def _init_thick_mode(oracledb, silent_if_missing: bool = False) -> bool:
+    """تفعيل Thick Mode في مكتبة oracledb عند الاتصال بقواعد بيانات Oracle 11g أو كلمة مرور قديمة (DPY-3010 / DPY-3015)"""
     global _THICK_MODE_INITIALIZED
     if _THICK_MODE_INITIALIZED:
         return True
@@ -455,7 +455,9 @@ def _init_thick_mode(oracledb) -> bool:
         candidates.append(os.getenv("ORACLE_CLIENT_LIB_DIR"))
 
     for pattern in (
+        r"C:\oracle\instantclient*\instantclient*",
         r"C:\oracle\instantclient*",
+        r"C:\oracle",
         r"D:\oracle\instantclient*",
         r"C:\instantclient*",
         os.path.join(script_dir, "instantclient*"),
@@ -465,9 +467,19 @@ def _init_thick_mode(oracledb) -> bool:
 
     candidates.extend([r"C:\OraNT\BIN", r"D:\OraNT\BIN", None])
 
+    saw_oci_dll = False
+    last_load_error = None
+
     for lib_dir in candidates:
-        if lib_dir is not None and not os.path.isdir(lib_dir):
+        if lib_dir is not None:
+            if not os.path.isdir(lib_dir):
+                continue
+            if not os.path.isfile(os.path.join(lib_dir, "oci.dll")):
+                continue
+            saw_oci_dll = True
+        elif silent_if_missing:
             continue
+
         try:
             if lib_dir:
                 oracledb.init_oracle_client(lib_dir=lib_dir)
@@ -482,12 +494,16 @@ def _init_thick_mode(oracledb) -> bool:
             if "already been initialized" in err_msg.lower() or "already initialized" in err_msg.lower():
                 _THICK_MODE_INITIALIZED = True
                 return True
+            last_load_error = f"{lib_dir}: {err_msg}"
             continue
 
-    print("\n[خطأ هام] خادم أوراكل لديك قديم (Oracle 11g أو أقدم) ويتطلب Oracle Instant Client (64-bit)!")
-    print("  الحل السريع:")
-    print("  1. حمّل حزمة Instant Client Basic Light 64-bit من أوراكل وفك ضغطها في: C:\\oracle\\instantclient")
-    print("  2. أو أضف مسار DLL أوراكل 64-bit إلى متغير البيئة ORACLE_CLIENT_LIB_DIR ثم أعد المحاولة.\n")
+    if not silent_if_missing:
+        if saw_oci_dll and last_load_error:
+            print(f"\n[خطأ هام] تم العثور على oci.dll لكن تعذر تحميله (غالباً لنقص Visual C++ x64): {last_load_error}")
+            print("  الحل: ثبّت حزمة Visual C++ Redistributable x64 من الرابط: https://aka.ms/vs/17/release/vc_redist.x64.exe\n")
+        else:
+            print("\n[خطأ هام] خادم أوراكل يتطلب Oracle Instant Client 64-bit لتشغيل Thick Mode (DPY-3010 / DPY-3015)!")
+            print("  الحل: حمّل حزمة Basic x64 وفك ضغطها في: C:\\oracle\\instantclient_19_26\n")
     return False
 
 
@@ -536,6 +552,9 @@ def get_oracle_connection():
 
     dsn = oracledb.makedsn(ORACLE_HOST, ORACLE_PORT, sid=ORACLE_SID)
 
+    # تفعيل Thick Mode استباقياً في حال وجود Instant Client محلياً (لحل DPY-3010 و DPY-3015)
+    _init_thick_mode(oracledb, silent_if_missing=True)
+
     raw_candidates = []
     if _RESOLVED_CREDENTIAL:
         raw_candidates.append(_RESOLVED_CREDENTIAL)
@@ -571,9 +590,9 @@ def get_oracle_connection():
             return conn
         except Exception as err:
             err_str = str(err)
-            # دعم اتصال Oracle 11g/10g عبر Thick Mode تلقائياً
-            if "DPY-3010" in err_str:
-                if _init_thick_mode(oracledb):
+            # دعم اتصال Oracle 11g/10g وكلمات المرور القديمة (DPY-3010 / DPY-3015) عبر Thick Mode تلقائياً
+            if any(code in err_str for code in ("DPY-3010", "DPY-3015", "DPY-3016", "in thin mode")):
+                if _init_thick_mode(oracledb, silent_if_missing=False):
                     continue
                 return None
             # خطأ في اسم المستخدم/كلمة المرور -> جرب السكيما التالية
