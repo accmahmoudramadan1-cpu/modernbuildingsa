@@ -4,8 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   WhatsAppIcon,
-  SettingsScriptIcon,
-  PlusIcon,
   RefreshIcon,
   CheckCircleIcon,
   AlertCircleIcon,
@@ -15,9 +13,7 @@ import {
   ExternalLinkIcon,
   CloseIcon,
   BuildingIcon,
-  InfoCircleIcon,
   DoubleCheckIcon,
-  CopyIcon,
   SearchIcon,
   TagIcon,
   PaperclipIcon,
@@ -74,12 +70,6 @@ export default function WhatsAppInvoicesPage() {
     type: "success" | "error";
     text: string;
   } | null>(null);
-
-  // Script & Mock Modal states
-  const [showScriptModal, setShowScriptModal] = useState(false);
-  const [showMockModal, setShowMockModal] = useState(false);
-  const [mockDocType, setMockDocType] = useState<OnyxDocType>("cash_invoice");
-  const [copiedScript, setCopiedScript] = useState(false);
 
   // Load Invoices from API
   async function loadInvoices() {
@@ -208,134 +198,6 @@ export default function WhatsAppInvoicesPage() {
     }
   }
 
-  // Add Demo Record by selected Template Type
-  async function handleAddMockByType(typeToCreate: OnyxDocType) {
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    const today = new Date().toISOString().split("T")[0];
-    const templateDef = getOnyxTemplate(typeToCreate);
-
-    const mockPayloads: Record<OnyxDocType, Partial<OracleInvoice>> = {
-      cash_invoice: {
-        invoice_number: `SI-C-${randomNum}`,
-        doc_type: "cash_invoice",
-        customer_code: "1025",
-        customer_name: "مؤسسة الرواد للمقاولات",
-        phone: "0554303422",
-        amount: "3750.00",
-        remaining_balance: "0.00",
-        payment_method: "نقداً",
-        onyx_form_code: "SI-CASH",
-        details: "فاتورة مبيعات نقدية تجريبية من نظام Onyx Pro",
-      },
-      credit_invoice: {
-        invoice_number: `SI-CR-${randomNum}`,
-        doc_type: "credit_invoice",
-        customer_code: "705",
-        customer_name: "يحيى عبدالله دكام الشريف",
-        phone: "0505726500",
-        amount: "2450.00",
-        remaining_balance: "11401.57",
-        payment_method: "آجل",
-        onyx_form_code: "SI-CREDIT",
-        details: "فاتورة مبيعات آجلة تجريبية مع الرصيد المتبقي",
-      },
-      receipt_voucher: {
-        invoice_number: `RV-${randomNum}`,
-        doc_type: "receipt_voucher",
-        customer_code: "7023",
-        customer_name: "محمد العباسي",
-        phone: "0554783338",
-        amount: "1200.00",
-        remaining_balance: "911.49",
-        payment_method: "تحويل بنكي",
-        onyx_form_code: "RV",
-        details: "سند قبض سداد من الحساب الآجل",
-      },
-      account_statement: {
-        invoice_number: `STMT-${randomNum}`,
-        doc_type: "account_statement",
-        customer_code: "702",
-        customer_name: "امين عيظة العكة",
-        phone: "0557653323",
-        amount: "338.88",
-        remaining_balance: "338.88",
-        onyx_form_code: "ALRTT002",
-        details: "كشف حساب ومطابقة عميل",
-      },
-      price_quotation: {
-        invoice_number: `QT-${randomNum}`,
-        doc_type: "price_quotation",
-        customer_code: "7047",
-        customer_name: "عبدالله يحيى صوان",
-        phone: "0557993232",
-        amount: "16800.00",
-        onyx_form_code: "QT",
-        details: "عرض سعر توريد مواد بناء",
-      },
-      purchase_order: {
-        invoice_number: `PO-${randomNum}`,
-        doc_type: "purchase_order",
-        customer_code: "SUP-118",
-        customer_name: "شركة مصانع الدهانات الوطنية",
-        phone: "0501960009",
-        amount: "19200.00",
-        onyx_form_code: "PO",
-        details: "طلب شراء أصناف دهانات وبرايمر للمورد",
-      },
-      customer_discount_notice: {
-        invoice_number: `260100${randomNum}`,
-        doc_type: "customer_discount_notice",
-        customer_code: "70714",
-        customer_name: "قاسم حسن المؤيد",
-        phone: "0554303422",
-        amount: "197.48",
-        remaining_balance: "3473.02",
-        payment_method: "خصم سداد",
-        onyx_form_code: "ARST045",
-        details: "إشعار خصم عميل متعدد من شاشة ARST045",
-      },
-      direct_alert: {
-        invoice_number: `ALRT-${randomNum}`,
-        doc_type: "direct_alert",
-        customer_code: "703",
-        customer_name: "مؤسسة المصباح المميز التجارية",
-        phone: "0550408666",
-        amount: "5283.08",
-        remaining_balance: "5283.08",
-        onyx_form_code: "ALRTT002",
-        details: "برجاء سداد المبالغ المستحقة - البناء الحديث",
-      },
-    };
-
-    const payload = {
-      ...mockPayloads[typeToCreate],
-      currency: "ر.س",
-      invoice_date: today,
-      status: "pending",
-    };
-
-    try {
-      const res = await fetch("/api/oracle-orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        setShowMockModal(false);
-        await loadInvoices();
-        setActionMessage({
-          type: "success",
-          text: `تمت إضافة (${templateDef.label}) تجريبي برقم (${payload.invoice_number}) بنجاح.`,
-        });
-      }
-    } catch {
-      setActionMessage({
-        type: "error",
-        text: "تعذر إضافة العملية التجريبية.",
-      });
-    }
-  }
-
   // Filter & Search
   const filteredInvoices = invoices.filter((item) => {
     const q = searchQuery.toLowerCase().trim();
@@ -383,22 +245,6 @@ export default function WhatsAppInvoicesPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => setShowScriptModal(true)}
-              className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm font-bold text-gray-700 shadow-sm transition hover:bg-gray-100"
-            >
-              <SettingsScriptIcon className="h-4 w-4 text-gray-600" />
-              <span>كود سكربت OraNT</span>
-            </button>
-
-            <button
-              onClick={() => setShowMockModal(true)}
-              className="flex items-center gap-2 rounded-xl border border-orange-200 bg-orange-50 px-4 py-2.5 text-sm font-bold text-orange-700 transition hover:bg-orange-100"
-            >
-              <PlusIcon className="h-4 w-4 text-orange-600" />
-              <span>إضافة عملية للتجربة</span>
-            </button>
-
             <button
               onClick={loadInvoices}
               disabled={loading}
@@ -572,7 +418,7 @@ export default function WhatsAppInvoicesPage() {
               <InvoiceDocumentIcon className="mx-auto h-16 w-16 text-gray-300" />
               <h3 className="mt-4 text-lg font-black text-gray-800">لا توجد عمليات مطابقة</h3>
               <p className="mt-1 text-sm text-gray-500">
-                تأكد من تشغيل سكربت المزامنة على جهاز OraNT أو أضف عملية تجريبية للاختبار.
+                تأكد من تشغيل خدمة المزامنة التلقائية مع نظام أونكس أو اضغط تحديث البيانات.
               </p>
             </div>
           ) : (
@@ -944,180 +790,6 @@ export default function WhatsAppInvoicesPage() {
                     <span>إرسال عبر واتساب الآن</span>
                   </>
                 )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- MODAL: Pick Mock Document Type --- */}
-      {showMockModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gray-100 bg-[#fbfbfa] px-6 py-5">
-              <div className="flex items-center gap-2.5">
-                <PlusIcon className="h-5 w-5 text-orange-600" />
-                <h3 className="text-base font-black text-gray-900">
-                  إضافة عملية تجريبية من قوالب أونكس
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowMockModal(false)}
-                className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-              >
-                <CloseIcon className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <p className="text-xs font-bold text-gray-500">
-                اختر نوع القالب المطلوب إنشاء عملية تجريبية له في القائمة:
-              </p>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                {ONYX_TEMPLATE_LIST.map((tpl) => (
-                  <button
-                    key={tpl.id}
-                    type="button"
-                    onClick={() => setMockDocType(tpl.id)}
-                    className={`rounded-2xl border p-3 text-right transition ${
-                      mockDocType === tpl.id
-                        ? "border-orange-500 bg-orange-50 text-orange-900"
-                        : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
-                    }`}
-                  >
-                    <p className="text-xs font-black">{tpl.label}</p>
-                    <p className="mt-1 font-mono text-[10px] font-bold text-gray-400">
-                      {tpl.onyxScreenCode}
-                    </p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between border-t border-gray-100 bg-[#fbfbfa] px-6 py-4">
-              <button
-                onClick={() => setShowMockModal(false)}
-                className="rounded-xl px-4 py-2 text-xs font-bold text-gray-500 hover:bg-gray-100"
-              >
-                إلغاء
-              </button>
-              <button
-                onClick={() => handleAddMockByType(mockDocType)}
-                className="rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-black text-white shadow-sm hover:bg-orange-700"
-              >
-                إضافة العملية التجريبية
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* --- MODAL: Script and Connection Info --- */}
-      {showScriptModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl overflow-hidden rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gray-100 bg-[#fbfbfa] px-6 py-5">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gray-100 text-gray-800">
-                  <SettingsScriptIcon className="h-5 w-5 text-gray-700" />
-                </span>
-                <div>
-                  <h3 className="text-lg font-black text-gray-900">
-                    ربط السكربت الخارجي لنظام أونكس برو (OraNT / Onyx Pro)
-                  </h3>
-                  <p className="text-xs font-bold text-gray-500">
-                    التقاط القيم من جميع شاشات أونكس (الفواتير، السندات، ALRTT002، ARST045، عروض الأسعار)
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowScriptModal(false)}
-                className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
-              >
-                <CloseIcon className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="max-h-[75vh] overflow-y-auto p-6 space-y-5 text-sm">
-              <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
-                <div className="flex items-center gap-2 font-black text-blue-900">
-                  <InfoCircleIcon className="h-4 w-4 text-blue-600" />
-                  <h4>كيف يعمل الربط الشامل مع Onyx Pro؟</h4>
-                </div>
-                <ol className="mt-2 list-decimal pr-5 space-y-1 text-xs text-blue-800 leading-relaxed font-semibold">
-                  <li>
-                    السكربت يتصل بقاعدة بيانات Oracle (`onyxserver:1521/orcl`) بحساب القراءة فقط.
-                  </li>
-                  <li>
-                    يلتقط تلقائياً: الفواتير النقدية والآجلة، سندات القبض، تنبيهات شاشة `ALRTT002`، إشعارات خصم العملاء `ARST045`، عروض الأسعار وطلبات الشراء.
-                  </li>
-                  <li>
-                    يرسل القيم مصنفة بنوع القالب (`doc_type`) إلى الموقع لتظهر مع متغيراتها جاهزة للإرسال الفوري.
-                  </li>
-                </ol>
-              </div>
-
-              <div>
-                <p className="text-xs font-black text-gray-700">
-                  رابط الـ API المستقبل للعمليات (Endpoint):
-                </p>
-                <div
-                  className="mt-1.5 flex items-center justify-between rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 font-mono text-xs font-bold text-gray-800"
-                  dir="ltr"
-                >
-                  <span>https://modernbuildingsa.com/api/oracle-orders</span>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between">
-                  <p className="text-xs font-black text-gray-700">
-                    أوامر تشغيل واكتشاف جداول أونكس (Python):
-                  </p>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(
-                        `python scripts/sync_orant_invoices.py --discover`
-                      );
-                      setCopiedScript(true);
-                      setTimeout(() => setCopiedScript(false), 3000);
-                    }}
-                    className="flex items-center gap-1.5 text-xs font-bold text-orange-600 hover:underline"
-                  >
-                    {copiedScript ? (
-                      <>
-                        <CheckCircleIcon className="h-3.5 w-3.5 text-green-600" />
-                        <span>تم النسخ</span>
-                      </>
-                    ) : (
-                      <>
-                        <CopyIcon className="h-3.5 w-3.5" />
-                        <span>نسخ أمر الاكتشاف</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-                <div
-                  className="mt-2 rounded-2xl bg-gray-900 p-4 font-mono text-xs text-green-400 space-y-1.5"
-                  dir="ltr"
-                >
-                  <p className="text-gray-400"># 1. اكتشاف أسماء جداول أونكس الفعلية على السيرفر:</p>
-                  <p className="text-white">python scripts/sync_orant_invoices.py --discover</p>
-                  <p className="text-gray-400 pt-2"># 2. اختبار إرسال جميع القوالب الـ 8 (وضع التجربة):</p>
-                  <p className="text-white">python scripts/sync_orant_invoices.py --mock</p>
-                  <p className="text-gray-400 pt-2"># 3. التشغيل المستمر في الخلفية:</p>
-                  <p className="text-white">python scripts/sync_orant_invoices.py --loop 60</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-gray-100 bg-[#fbfbfa] px-6 py-4 text-left">
-              <button
-                onClick={() => setShowScriptModal(false)}
-                className="rounded-xl bg-black px-6 py-2.5 text-xs font-black text-white hover:bg-orange-600"
-              >
-                إغلاق
               </button>
             </div>
           </div>

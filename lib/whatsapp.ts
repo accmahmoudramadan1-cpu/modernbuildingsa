@@ -2,6 +2,31 @@
  * Helper utility for Meta WhatsApp Cloud API
  */
 
+/**
+ * Format Meta Graph API error payloads cleanly while exposing diagnostic codes
+ * (error code, subcode, user message, and fbtrace_id) for fast troubleshooting.
+ */
+function formatMetaApiError(data: any): string {
+  const err = data?.error;
+  if (!err || typeof err !== "object") {
+    return typeof data === "string" ? data : JSON.stringify(data);
+  }
+
+  const baseMessage = err.error_user_msg
+    ? `${err.message || "WhatsApp API Error"} — ${err.error_user_msg}`
+    : err.message || "WhatsApp API Error";
+
+  const extraDetails = err.error_data?.details ? ` (${err.error_data.details})` : "";
+  const codes: string[] = [];
+  if (err.code !== undefined) codes.push(`code: ${err.code}`);
+  if (err.error_subcode !== undefined) codes.push(`subcode: ${err.error_subcode}`);
+  if (err.fbtrace_id) codes.push(`fbtrace_id: ${err.fbtrace_id}`);
+
+  return codes.length > 0
+    ? `${baseMessage}${extraDetails} [${codes.join(", ")}]`
+    : `${baseMessage}${extraDetails}`;
+}
+
 export interface WhatsAppTextMessagePayload {
   messaging_product: "whatsapp";
   to: string;
@@ -118,7 +143,7 @@ export async function sendWhatsAppMessage(to: string, bodyText: string) {
 
     if (!response.ok) {
       console.error("[WhatsApp] API Error:", data);
-      return { success: false, error: data };
+      return { success: false, error: formatMetaApiError(data), details: data };
     }
 
     return {
@@ -231,11 +256,7 @@ export async function sendWhatsAppTemplate({
 
     if (!response.ok) {
       console.error("[WhatsApp Template] API Error:", data);
-      const errorMessage =
-        data?.error?.message ||
-        data?.error?.error_user_msg ||
-        JSON.stringify(data);
-      return { success: false, error: errorMessage, details: data };
+      return { success: false, error: formatMetaApiError(data), details: data };
     }
 
     return {
