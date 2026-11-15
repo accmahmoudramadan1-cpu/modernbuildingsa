@@ -40,7 +40,7 @@ except ImportError:
 # الإعدادات الافتراضية (يمكن تعديلها أو تمريرها عبر متغيرات البيئة)
 # =============================================================================
 API_ENDPOINT = os.getenv("MODERN_BUILDING_API_URL", "https://modernbuildingsa.com/api/oracle-orders")
-API_KEY = os.getenv("ORACLE_SYNC_API_KEY", "")
+API_KEY = os.getenv("ORACLE_SYNC_API_KEY", "modern_building_orant_sync_secret_2026")
 
 # إعدادات اتصال أوراكل (مطابقة لملف tnsnames.ora في OraNT)
 ORACLE_HOST = os.getenv("ORACLE_HOST", "onyxserver")
