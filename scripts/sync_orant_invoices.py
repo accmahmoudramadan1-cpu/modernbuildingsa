@@ -74,10 +74,41 @@ _RESOLVED_SCHEMA = None
 # مع استعلامات بديلة (Fallback) تدعم اختلاف إصدارات أونكس برو تلقائياً.
 # =============================================================================
 ONYX_QUERIES = {
-    # 1 & 2. الفواتير النقدية والآجلة (IAS_BILL_MST + IAS_BILL_DTL + CUSTOMER + EX_RATE)
+    # 1 & 2. الفواتير النقدية والآجلة (IAS_BILL_MST + IAS_BILL_DTL + CUSTOMER + IAS_CASH_CUSTMR + EX_RATE)
     "sales_invoices": {
         "enabled": True,
         "sql_candidates": [
+            f"""
+            SELECT
+                TO_CHAR(M.BILL_NO) AS DOC_NO,
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
+                TO_CHAR(NVL(M.C_CODE, M.C_CODE_CSH)) AS CUST_CODE,
+                COALESCE(C.C_A_NAME, M.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
+                COALESCE(C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO, M.C_TEL) AS PHONE,
+                TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                ROUND(
+                    NVL((
+                        SELECT SUM(
+                            (NVL(D.I_QTY, 0) * (NVL(D.I_PRICE, 0) - NVL(D.DIS_AMT, 0)))
+                            + (NVL(D.I_QTY, 0) * NVL(D.VAT_AMT, 0))
+                        )
+                        FROM IAS_BILL_DTL D
+                        WHERE D.BILL_SER = M.BILL_SER
+                    ), 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0),
+                    2
+                ) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س'))) AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
+                'SI' AS FORM_CODE,
+                M.A_DESC AS DETAILS
+            FROM IAS_BILL_MST M
+            LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = M.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(M.BILL_CURRENCY)
+            WHERE M.BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            ORDER BY M.BILL_DATE DESC, M.BILL_NO DESC
+            """,
             f"""
             SELECT
                 TO_CHAR(M.BILL_NO) AS DOC_NO,
@@ -108,201 +139,112 @@ ONYX_QUERIES = {
             WHERE M.BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
             ORDER BY M.BILL_DATE DESC, M.BILL_NO DESC
             """,
-            f"""
-            SELECT
-                TO_CHAR(M.BILL_NO) AS DOC_NO,
-                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
-                TO_CHAR(M.C_CODE) AS CUST_CODE,
-                NVL(C.C_A_NAME, M.C_NAME) AS CUST_NAME,
-                COALESCE(C.C_MOBILE, C.C_PHONE, M.C_TEL) AS PHONE,
-                TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(M.BILL_AMT, 0) AS AMOUNT,
-                DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س')) AS CURRENCY,
-                NULL AS REMAINING_BALANCE,
-                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
-                'SI' AS FORM_CODE,
-                M.A_DESC AS DETAILS
-            FROM IAS_BILL_MST M
-            LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
-            WHERE M.BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-            ORDER BY M.BILL_DATE DESC, M.BILL_NO DESC
-            """,
-            f"""
-            SELECT
-                TO_CHAR(M.BILL_NO) AS DOC_NO,
-                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
-                TO_CHAR(M.C_CODE) AS CUST_CODE,
-                NVL(C.C_A_NAME, M.C_NAME) AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_TEL) AS PHONE,
-                TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(M.BILL_AMT, 0) AS AMOUNT,
-                NVL(M.CUR_CODE, 'ر.س') AS CURRENCY,
-                NVL(C.C_BAL, 0) AS REMAINING_BALANCE,
-                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
-                'SI' AS FORM_CODE,
-                M.BILL_DESC AS DETAILS
-            FROM IAS_SL_INVC_MST M
-            LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = M.C_CODE
-            WHERE M.BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-            ORDER BY M.BILL_DATE DESC, M.BILL_NO DESC
-            """,
         ],
     },
-    # 3. سندات القبض (Receipt Vouchers)
+    # 3. سندات القبض (VOUCHERS + VOUCHER_DETAIL + CUSTOMER + EX_RATE)
     "receipt_vouchers": {
         "enabled": True,
         "sql_candidates": [
             f"""
             SELECT
-                'RV-' || TO_CHAR(V.VOUCHER_NO) AS DOC_NO,
+                'RV-' || TO_CHAR(V.VOUCHER_NO) || '-' || TO_CHAR(C.C_CODE) AS DOC_NO,
                 'receipt_voucher' AS DOC_TYPE,
-                TO_CHAR(V.C_CODE) AS CUST_CODE,
-                C.C_A_NAME AS CUST_NAME,
+                TO_CHAR(C.C_CODE) AS CUST_CODE,
+                COALESCE(C.C_A_NAME, V.REC_NAME, V.REF_NAME, 'عميل') AS CUST_NAME,
                 NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
                 TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(V.VOUCHER_AMT, 0) AS AMOUNT,
-                'ر.س' AS CURRENCY,
+                ROUND(NVL(SUM(NVL(VD.AC_AMT, 0)), NVL(MAX(V.CASH_AMT), 0)), 2) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(V.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(V.A_CY), 'ر.س'))) AS CURRENCY,
                 NULL AS REMAINING_BALANCE,
-                NVL(V.V_DESC, 'نقداً / تحويل بنكي') AS PAYMENT_METHOD,
+                CASE NVL(V.VOUCHER_PAY_TYPE, 1)
+                    WHEN 1 THEN 'نقداً'
+                    WHEN 2 THEN 'شيك'
+                    WHEN 3 THEN 'تحويل بنكي'
+                    ELSE 'نقداً / تحويل بنكي'
+                END AS PAYMENT_METHOD,
                 'RV' AS FORM_CODE,
-                V.V_DESC AS DETAILS
-            FROM VOUCHER_MST V
-            LEFT JOIN CUSTOMER C ON C.C_CODE = V.C_CODE
-            WHERE V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-              AND V.VOUCHER_TYPE = 1
-            ORDER BY V.VOUCHER_DATE DESC
-            """,
-            f"""
-            SELECT
-                'RV-' || TO_CHAR(V.VOUCHER_NO) AS DOC_NO,
-                'receipt_voucher' AS DOC_TYPE,
-                TO_CHAR(V.C_CODE) AS CUST_CODE,
-                C.C_A_NAME AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
-                TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(V.VOUCHER_AMT, 0) AS AMOUNT,
-                NVL(V.CUR_CODE, 'ر.س') AS CURRENCY,
-                NULL AS REMAINING_BALANCE,
-                NVL(V.PAY_TYPE_NAME, 'نقداً / تحويل بنكي') AS PAYMENT_METHOD,
-                'RV' AS FORM_CODE,
-                V.V_DESC AS DETAILS
-            FROM IAS_VCHR_MST V
-            LEFT JOIN CUSTOMER C ON C.C_CODE = V.C_CODE
-            WHERE V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-              AND V.VOUCHER_TYPE = 1
-            ORDER BY V.VOUCHER_DATE DESC
-            """,
-            f"""
-            SELECT
-                'RV-' || TO_CHAR(V.VOUCHER_NO) AS DOC_NO,
-                'receipt_voucher' AS DOC_TYPE,
-                TO_CHAR(V.C_CODE) AS CUST_CODE,
-                C.C_A_NAME AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_TEL) AS PHONE,
-                TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(V.VOUCHER_AMT, 0) AS AMOUNT,
-                NVL(V.CUR_CODE, 'ر.س') AS CURRENCY,
-                NVL(C.C_BAL, 0) AS REMAINING_BALANCE,
-                NVL(V.PAY_TYPE_NAME, 'نقداً / تحويل بنكي') AS PAYMENT_METHOD,
-                'RV' AS FORM_CODE,
-                V.V_DESC AS DETAILS
-            FROM IAS_VCHR_MST V
-            LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = V.C_CODE
-            WHERE V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-              AND V.VOUCHER_TYPE = 1
-            ORDER BY V.VOUCHER_DATE DESC
+                NVL(MAX(VD.AC_DESC), V.A_DESC) AS DETAILS
+            FROM VOUCHERS V
+            JOIN VOUCHER_DETAIL VD ON VD.V_SER = V.V_SER AND VD.VOUCHER_TYPE = V.VOUCHER_TYPE
+            JOIN CUSTOMER C ON C.C_CODE = COALESCE(VD.C_CODE, VD.AC_CODE_DTL)
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(V.A_CY)
+            WHERE V.VOUCHER_TYPE = 1
+              AND V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            GROUP BY
+                V.VOUCHER_NO, C.C_CODE, C.C_A_NAME, C.C_MOBILE, C.C_PHONE,
+                V.REC_NAME, V.REF_NAME, V.VOUCHER_DATE, V.VOUCHER_PAY_TYPE,
+                V.A_CY, E.CUR_NAME, V.A_DESC
+            ORDER BY V.VOUCHER_DATE DESC, V.VOUCHER_NO DESC
             """,
         ],
     },
-    # 4 & 8. شاشة الرسائل المباشرة وكشوف المطابقة (ALRTT002) - طريقة التواصل = 8 (واتساب)
+    # 4 & 8. شاشة الرسائل المباشرة وكشوف المطابقة ALRTT002 (IAS_MSG_SMS + IAS_MSG_SMS_DTL)
     "direct_alerts_alrtt002": {
         "enabled": True,
         "sql_candidates": [
             f"""
             SELECT
-                'ALRT-' || TO_CHAR(H.MSG_NO) || '-' || TO_CHAR(D.C_CODE) AS DOC_NO,
-                CASE WHEN NVL(D.SND_STMT, 0) = 1 THEN 'account_statement' ELSE 'direct_alert' END AS DOC_TYPE,
-                TO_CHAR(D.C_CODE) AS CUST_CODE,
-                NVL(D.C_NAME, C.C_A_NAME) AS CUST_NAME,
-                COALESCE(D.MOBILE_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
+                'ALRT-' || TO_CHAR(H.MSG_NO) || '-' || TO_CHAR(NVL(D.RCVR_CODE, TO_CHAR(D.RCRD_NO))) AS DOC_NO,
+                CASE WHEN D.ATTCH_EMAIL_FILE IS NOT NULL THEN 'account_statement' ELSE 'direct_alert' END AS DOC_TYPE,
+                TO_CHAR(D.RCVR_CODE) AS CUST_CODE,
+                COALESCE(D.RCVR_NM, C.C_A_NAME, 'عميل') AS CUST_NAME,
+                COALESCE(D.MOBILE_NO, H.MOBILE_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
                 TO_CHAR(NVL(H.AD_DATE, SYSDATE), 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(D.BAL_AMT, 0) AS AMOUNT,
-                NVL(H.CUR_CODE, 'ر.س') AS CURRENCY,
-                NVL(D.BAL_AMT, 0) AS REMAINING_BALANCE,
+                TO_CHAR(D.BLNC_MSG) AS AMOUNT,
+                'ر.س' AS CURRENCY,
+                TO_CHAR(D.BLNC_MSG) AS REMAINING_BALANCE,
                 NULL AS PAYMENT_METHOD,
                 'ALRTT002' AS FORM_CODE,
                 H.MSG_TXT AS DETAILS
-            FROM IAS_ALRT_MSG_MST H
-            JOIN IAS_ALRT_MSG_DTL D ON D.MSG_NO = H.MSG_NO
-            LEFT JOIN CUSTOMER C ON C.C_CODE = D.C_CODE
-            WHERE NVL(H.COMM_TYPE, 8) = 8
-              AND NVL(H.AD_DATE, SYSDATE) >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-            """,
-            f"""
-            SELECT
-                'ALRT-' || TO_CHAR(H.MSG_NO) || '-' || TO_CHAR(D.C_CODE) AS DOC_NO,
-                CASE WHEN NVL(D.SND_STMT, 0) = 1 THEN 'account_statement' ELSE 'direct_alert' END AS DOC_TYPE,
-                TO_CHAR(D.C_CODE) AS CUST_CODE,
-                NVL(D.C_NAME, C.C_A_NAME) AS CUST_NAME,
-                COALESCE(D.MOBILE_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
-                TO_CHAR(NVL(H.AD_DATE, SYSDATE), 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(D.BAL_AMT, 0) AS AMOUNT,
-                NVL(H.CUR_CODE, 'ر.س') AS CURRENCY,
-                NVL(D.BAL_AMT, 0) AS REMAINING_BALANCE,
-                NULL AS PAYMENT_METHOD,
-                'ALRTT002' AS FORM_CODE,
-                H.MSG_TXT AS DETAILS
-            FROM ALRT_MSG_MST H
-            JOIN ALRT_MSG_DTL D ON D.MSG_NO = H.MSG_NO
-            LEFT JOIN CUSTOMER C ON C.C_CODE = D.C_CODE
-            WHERE NVL(H.COMM_TYPE, 8) = 8
-              AND NVL(H.AD_DATE, SYSDATE) >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            FROM IAS_MSG_SMS H
+            JOIN IAS_MSG_SMS_DTL D ON D.MSG_NO = H.MSG_NO
+            LEFT JOIN CUSTOMER C ON C.C_CODE = D.RCVR_CODE
+            WHERE NVL(H.AD_DATE, SYSDATE) >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            ORDER BY H.MSG_NO DESC, D.RCRD_NO ASC
             """,
         ],
     },
-    # 5. عروض الأسعار (Price Quotations)
+    # 5. عروض الأسعار (QUOTATION + QUOTATION_DETAIL + CUSTOMER + IAS_CASH_CUSTMR)
     "price_quotations": {
         "enabled": True,
         "sql_candidates": [
             f"""
             SELECT
-                'QT-' || TO_CHAR(Q.QT_NO) AS DOC_NO,
+                'QT-' || TO_CHAR(Q.QUOT_NO) AS DOC_NO,
                 'price_quotation' AS DOC_TYPE,
-                TO_CHAR(Q.C_CODE) AS CUST_CODE,
-                NVL(C.C_A_NAME, Q.C_NAME) AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
-                TO_CHAR(Q.QT_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(Q.QT_NET_AMT, Q.QT_AMT) AS AMOUNT,
-                NVL(Q.CUR_CODE, 'ر.س') AS CURRENCY,
+                TO_CHAR(NVL(Q.C_CODE, Q.C_CODE_CSH)) AS CUST_CODE,
+                COALESCE(C.C_A_NAME, Q.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
+                COALESCE(Q.MOBILE_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
+                TO_CHAR(Q.QUOT_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                ROUND(
+                    NVL(
+                        NULLIF(Q.QUOT_AMT, 0),
+                        NVL((
+                            SELECT SUM(
+                                (NVL(QD.I_QTY, 0) * (NVL(QD.I_PRICE, 0) - NVL(QD.DIS_AMT, 0)))
+                                + (NVL(QD.I_QTY, 0) * NVL(QD.VAT_AMT, 0))
+                            )
+                            FROM QUOTATION_DETAIL QD
+                            WHERE QD.QUOT_SER = Q.QUOT_SER
+                        ), 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
+                    ),
+                    2
+                ) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(Q.QUOT_CUR))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(Q.QUOT_CUR), 'ر.س'))) AS CURRENCY,
                 NULL AS REMAINING_BALANCE,
                 NULL AS PAYMENT_METHOD,
                 'QT' AS FORM_CODE,
-                Q.QT_DESC AS DETAILS
-            FROM IAS_QUOT_MST Q
+                Q.A_DESC AS DETAILS
+            FROM QUOTATION Q
             LEFT JOIN CUSTOMER C ON C.C_CODE = Q.C_CODE
-            WHERE Q.QT_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-            """,
-            f"""
-            SELECT
-                'QT-' || TO_CHAR(Q.QT_NO) AS DOC_NO,
-                'price_quotation' AS DOC_TYPE,
-                TO_CHAR(Q.C_CODE) AS CUST_CODE,
-                NVL(C.C_A_NAME, Q.C_NAME) AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
-                TO_CHAR(Q.QT_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(Q.QT_AMT, 0) AS AMOUNT,
-                'ر.س' AS CURRENCY,
-                NULL AS REMAINING_BALANCE,
-                NULL AS PAYMENT_METHOD,
-                'QT' AS FORM_CODE,
-                Q.QT_DESC AS DETAILS
-            FROM IAS_QT_MST Q
-            LEFT JOIN CUSTOMER C ON C.C_CODE = Q.C_CODE
-            WHERE Q.QT_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = Q.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(Q.QUOT_CUR)
+            WHERE Q.QUOT_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            ORDER BY Q.QUOT_DATE DESC, Q.QUOT_NO DESC
             """,
         ],
     },
-    # 6. طلبات الشراء للموردين (Purchase Orders - V_DETAILS)
+    # 6. طلبات الشراء للموردين (P_ORDER + P_ORDER_DETAIL + V_DETAILS + EX_RATE)
     "purchase_orders": {
         "enabled": True,
         "sql_candidates": [
@@ -314,75 +256,66 @@ ONYX_QUERIES = {
                 NVL(V.V_A_NAME, P.V_NAME) AS CUST_NAME,
                 NVL(V.V_MOBILE, V.V_PHONE) AS PHONE,
                 TO_CHAR(P.PO_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(P.PO_AMT, 0) AS AMOUNT,
-                NVL(P.CUR_CODE, 'ر.س') AS CURRENCY,
+                ROUND(
+                    NVL(
+                        NULLIF(P.PO_AMT, 0),
+                        NVL((
+                            SELECT SUM(
+                                (NVL(PD.I_QTY, 0) * (NVL(PD.I_PRICE, 0) - NVL(PD.DIS_AMT, 0)))
+                                + (NVL(PD.I_QTY, 0) * NVL(PD.VAT_AMT, 0))
+                            )
+                            FROM P_ORDER_DETAIL PD
+                            WHERE PD.PO_SER = P.PO_SER
+                        ), 0) - NVL(P.DISC_AMT, 0) + NVL(P.VAT_AMT, 0) + NVL(P.OTHR_AMT, 0)
+                    ),
+                    2
+                ) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(P.CUR_CODE))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(P.CUR_CODE), 'ر.س'))) AS CURRENCY,
                 NULL AS REMAINING_BALANCE,
                 NULL AS PAYMENT_METHOD,
                 'PO' AS FORM_CODE,
                 P.PO_DESC AS DETAILS
-            FROM IAS_PO_MST P
+            FROM P_ORDER P
             LEFT JOIN V_DETAILS V ON V.V_CODE = P.V_CODE
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(P.CUR_CODE)
             WHERE P.PO_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-            """,
-            f"""
-            SELECT
-                'PO-' || TO_CHAR(P.PO_NO) AS DOC_NO,
-                'purchase_order' AS DOC_TYPE,
-                TO_CHAR(P.V_CODE) AS CUST_CODE,
-                NVL(V.V_A_NAME, P.V_NAME) AS CUST_NAME,
-                NVL(V.V_MOBILE, V.V_TEL) AS PHONE,
-                TO_CHAR(P.PO_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(P.PO_AMT, 0) AS AMOUNT,
-                NVL(P.CUR_CODE, 'ر.س') AS CURRENCY,
-                NULL AS REMAINING_BALANCE,
-                NULL AS PAYMENT_METHOD,
-                'PO' AS FORM_CODE,
-                P.PO_DESC AS DETAILS
-            FROM IAS_PO_MST P
-            LEFT JOIN IAS_VENDOR V ON V.V_CODE = P.V_CODE
-            WHERE P.PO_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            ORDER BY P.PO_DATE DESC, P.PO_NO DESC
             """,
         ],
     },
-    # 7. إشعارات خصم العملاء المتعدد (شاشة ARST045)
+    # 7. إشعارات خصم العملاء المتعدد شاشة ARST045 (IAS_BILL_MST_ADD_DISC + IAS_BILL_ADD_DISC_BILLS)
     "customer_discount_notices_arst045": {
         "enabled": True,
         "sql_candidates": [
             f"""
             SELECT
-                'ARST-' || TO_CHAR(N.DOC_NO) AS DOC_NO,
+                'ARST-' || TO_CHAR(N.DOC_NO) || '-' || TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH, '0')) AS DOC_NO,
                 'customer_discount_notice' AS DOC_TYPE,
-                TO_CHAR(N.C_CODE) AS CUST_CODE,
-                C.C_A_NAME AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
+                TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH)) AS CUST_CODE,
+                COALESCE(C.C_A_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
+                COALESCE(C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
                 TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(N.TOT_AMT_WITH_TAX, N.DISC_AMT) AS AMOUNT,
-                NVL(N.CUR_CODE, 'ر.س') AS CURRENCY,
+                CASE
+                    WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
+                        THEN ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
+                    ELSE ROUND(SUM(NVL(B.ADD_DISCOUNT, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
+                END AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(N.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(N.A_CY), 'ر.س'))) AS CURRENCY,
                 NULL AS REMAINING_BALANCE,
                 NVL(N.DOC_DESC, 'خصم سداد') AS PAYMENT_METHOD,
                 'ARST045' AS FORM_CODE,
                 N.DOC_DESC AS DETAILS
-            FROM AR_CUST_NTCE_MST N
-            LEFT JOIN CUSTOMER C ON C.C_CODE = N.C_CODE
+            FROM IAS_BILL_MST_ADD_DISC N
+            LEFT JOIN IAS_BILL_ADD_DISC_BILLS B ON B.DOC_SER = N.DOC_SER
+            LEFT JOIN CUSTOMER C ON C.C_CODE = COALESCE(N.C_CODE, B.C_CODE)
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = N.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(N.A_CY)
             WHERE N.DOC_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
-            """,
-            f"""
-            SELECT
-                'ARST-' || TO_CHAR(N.DOC_NO) AS DOC_NO,
-                'customer_discount_notice' AS DOC_TYPE,
-                TO_CHAR(N.C_CODE) AS CUST_CODE,
-                C.C_A_NAME AS CUST_NAME,
-                NVL(C.C_MOBILE, C.C_TEL) AS PHONE,
-                TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                NVL(N.TOT_AMT_WITH_TAX, N.DISC_AMT) AS AMOUNT,
-                NVL(N.CUR_CODE, 'ر.س') AS CURRENCY,
-                NVL(C.C_BAL, 0) AS REMAINING_BALANCE,
-                NVL(N.DOC_DESC, 'خصم سداد') AS PAYMENT_METHOD,
-                'ARST045' AS FORM_CODE,
-                N.DOC_DESC AS DETAILS
-            FROM AR_CUST_NTCE_MST N
-            LEFT JOIN IAS_CUSTOMER C ON C.C_CODE = N.C_CODE
-            WHERE N.DOC_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            GROUP BY
+                N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
+                C.C_A_NAME, C.C_MOBILE, C.C_PHONE, CC.CUST_F_NM, CC.CUST_L_NM,
+                CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC
+            ORDER BY N.DOC_DATE DESC, N.DOC_NO DESC
             """,
         ],
     },
@@ -682,6 +615,29 @@ def discover_onyx_tables():
         print(f"[خطأ في فحص الجداول] {e}")
 
 
+def _parse_amount(val, default=None):
+    """تحويل المبالغ القادمة كأرقام أو كنصوص مثل 'الرصيد الحالي: 338.88' بأمان"""
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        pass
+    text = str(val).replace(",", "").strip()
+    if not text:
+        return default
+    try:
+        return float(text)
+    except ValueError:
+        match = re.search(r"-?\d+(?:\.\d+)?", text)
+        if match:
+            try:
+                return float(match.group(0))
+            except ValueError:
+                pass
+    return default
+
+
 def fetch_documents_from_oracle():
     """الاتصال بقاعدة بيانات أوراكل واسترجاع كافة العمليات من الجداول المفعلة"""
     print(f"[*] جاري الاتصال بقاعدة بيانات أوراكل ({ORACLE_HOST}:{ORACLE_PORT}/{ORACLE_SID})...")
@@ -719,9 +675,9 @@ def fetch_documents_from_oracle():
                             "customer_name": str(r[3] or "عميل").strip(),
                             "phone": phone,
                             "invoice_date": str(r[5] or datetime.now().strftime("%Y-%m-%d")),
-                            "amount": float(r[6] or 0),
+                            "amount": _parse_amount(r[6], 0.0),
                             "currency": str(r[7] or "ر.س").strip(),
-                            "remaining_balance": float(r[8]) if r[8] is not None else None,
+                            "remaining_balance": _parse_amount(r[8], None),
                             "payment_method": str(r[9]).strip() if r[9] is not None else None,
                             "onyx_form_code": str(r[10]).strip() if r[10] is not None else None,
                             "details": str(r[11] or "").strip(),
