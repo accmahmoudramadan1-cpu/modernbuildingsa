@@ -199,6 +199,16 @@ export async function getOracleInvoices(): Promise<OracleInvoice[]> {
   return memoryInvoicesCache;
 }
 
+function sanitizeNumeric(val: unknown, fallback: number): number;
+function sanitizeNumeric(val: unknown, fallback: null): number | null;
+function sanitizeNumeric(val: unknown, fallback: number | null): number | null {
+  if (val === undefined || val === null || String(val).trim() === "") {
+    return fallback;
+  }
+  const num = Number(String(val).replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(num) ? num : fallback;
+}
+
 /**
  * Upsert documents/invoices imported from Oracle (OraNT / Onyx Pro)
  */
@@ -211,19 +221,16 @@ export async function upsertOracleInvoices(
 
   const now = new Date().toISOString();
   const formatted: OracleInvoice[] = incomingInvoices.map((item, idx) => ({
-    id: item.id || `ora-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+    id: item.id || crypto.randomUUID(),
     invoice_number: String(item.invoice_number || "").trim() || `DOC-${Date.now()}-${idx}`,
     doc_type: (item.doc_type || "cash_invoice") as OnyxDocType,
     customer_code: item.customer_code ? String(item.customer_code).trim() : null,
     customer_name: String(item.customer_name || "عميل غير محدد").trim(),
     phone: String(item.phone || "").trim(),
     invoice_date: item.invoice_date || now.split("T")[0],
-    amount: item.amount ?? 0,
+    amount: sanitizeNumeric(item.amount, 0),
     currency: item.currency || "ر.س",
-    remaining_balance:
-      item.remaining_balance !== undefined && item.remaining_balance !== null
-        ? item.remaining_balance
-        : null,
+    remaining_balance: sanitizeNumeric(item.remaining_balance, null),
     payment_method: item.payment_method ? String(item.payment_method).trim() : null,
     attachment_url: item.attachment_url ? String(item.attachment_url).trim() : null,
     onyx_form_code: item.onyx_form_code ? String(item.onyx_form_code).trim() : null,
@@ -235,12 +242,15 @@ export async function upsertOracleInvoices(
     updated_at: now,
   }));
 
+  // Omit id so PostgreSQL uses DEFAULT gen_random_uuid() on insert and preserves existing id on conflict
+  const supabasePayload = formatted.map(({ id: _omitId, ...rest }) => rest);
+
   // Try saving to Supabase first
   try {
     const supabase = await createSupabaseServerClient();
     const { error } = await supabase
       .from("oracle_invoices")
-      .upsert(formatted, { onConflict: "invoice_number" });
+      .upsert(supabasePayload, { onConflict: "invoice_number" });
 
     if (!error) {
       for (const item of formatted) {
@@ -254,6 +264,8 @@ export async function upsertOracleInvoices(
         }
       }
       return { success: true, count: formatted.length };
+    } else {
+      console.warn("[OracleInvoices] Supabase upsert error:", error.message);
     }
   } catch (err: any) {
     console.warn("[OracleInvoices] Supabase upsert error, falling back to memory:", err?.message);
