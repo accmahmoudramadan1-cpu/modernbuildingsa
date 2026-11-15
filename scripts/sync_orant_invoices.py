@@ -31,6 +31,15 @@ import argparse
 import re
 from datetime import datetime
 
+# ضمان عدم حدوث UnicodeEncodeError عند توجيه المخرجات في Windows CMD أو ملفات السجل
+for _stream_name in ("stdout", "stderr"):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 try:
     import requests
 except ImportError:
