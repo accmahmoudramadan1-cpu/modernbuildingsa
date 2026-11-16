@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase-client";
 
 type Category = {
   id: string;
@@ -22,8 +21,6 @@ type Product = {
 };
 
 export default function ProductsPage() {
-  const supabase = createClient();
-
   const [categories, setCategories] = useState<Category[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
 
@@ -51,26 +48,20 @@ const [additionalPreviewUrls, setAdditionalPreviewUrls] = useState<string[]>(
   async function loadData() {
     setLoading(true);
 
-    const [categoriesResult, productsResult] = await Promise.all([
-      supabase
-        .from("categories")
-        .select("id, name")
-        .order("name"),
+    try {
+      const res = await fetch("/api/admin/products", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) {
+        setMessage("حدث خطأ أثناء تحميل البيانات");
+        setLoading(false);
+        return;
+      }
 
-      supabase
-        .from("products")
-        .select("*")
-        .order("created_at", { ascending: false }),
-    ]);
-
-    if (categoriesResult.error || productsResult.error) {
+      setCategories(json.categories || []);
+      setProducts(json.products || []);
+    } catch {
       setMessage("حدث خطأ أثناء تحميل البيانات");
-      setLoading(false);
-      return;
     }
-
-    setCategories(categoriesResult.data || []);
-    setProducts(productsResult.data || []);
     setLoading(false);
   }
 
@@ -137,39 +128,20 @@ function handleAdditionalImagesChange(
     setSaving(true);
     setMessage("");
 
-    let uploadedImagePath: string | null = null;
     let imageUrl: string | null = null;
 
     try {
       if (imageFile) {
-        const extension =
-          imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
-
-        const fileName = `${crypto.randomUUID()}.${extension}`;
-        const filePath = `products/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("product-images")
-          .upload(filePath, imageFile, {
-            cacheControl: "3600",
-            upsert: false,
-          });
-
-        if (uploadError) {
-          setMessage(
-            `حدث خطأ أثناء رفع الصورة: ${uploadError.message}`
-          );
+        const fd = new FormData();
+        fd.append("file", imageFile);
+        const upRes = await fetch("/api/admin/upload", { method: "POST", body: fd });
+        const upJson = await upRes.json();
+        if (!upRes.ok || !upJson.url) {
+          setMessage(`حدث خطأ أثناء رفع الصورة: ${upJson.error || ""}`);
           setSaving(false);
           return;
         }
-
-        uploadedImagePath = filePath;
-
-        const { data: publicUrlData } = supabase.storage
-          .from("product-images")
-          .getPublicUrl(filePath);
-
-        imageUrl = publicUrlData.publicUrl;
+        imageUrl = upJson.url;
       }
 
       const parsedPrice =
@@ -179,93 +151,44 @@ function handleAdditionalImagesChange(
         parsedPrice !== null &&
         (!Number.isFinite(parsedPrice) || parsedPrice < 0)
       ) {
-        if (uploadedImagePath) {
-          await supabase.storage
-            .from("product-images")
-            .remove([uploadedImagePath]);
-        }
-
         setMessage("اكتب سعرًا صحيحًا");
         setSaving(false);
         return;
       }
 
-     const { data: insertedProduct, error: insertError } = await supabase
-  .from("products")
-  .insert({
-    name: name.trim(),
-    category_id: categoryId,
-    description: description.trim() || null,
-    price: parsedPrice,
-    currency: currency.trim() || null,
-    show_price: showPrice,
-    image_url: imageUrl,
-    available,
-  })
-  .select("id")
-  .single();
-
-      if (insertError) {
-        if (uploadedImagePath) {
-          await supabase.storage
-            .from("product-images")
-            .remove([uploadedImagePath]);
+      const additionalImageUrls: string[] = [];
+      for (const file of additionalImageFiles) {
+        const fd = new FormData();
+        fd.append("file", file);
+        const addRes = await fetch("/api/admin/upload", { method: "POST", body: fd });
+        const addJson = await addRes.json();
+        if (addRes.ok && addJson.url) {
+          additionalImageUrls.push(addJson.url);
         }
+      }
 
-        setMessage(
-          `حدث خطأ أثناء إضافة المنتج: ${insertError.message}`
-        );
+      const insertRes = await fetch("/api/admin/products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          category_id: categoryId,
+          description: description.trim() || null,
+          price: parsedPrice,
+          currency: currency.trim() || null,
+          show_price: showPrice,
+          image_url: imageUrl,
+          available,
+          additional_images: additionalImageUrls,
+        }),
+      });
+
+      if (!insertRes.ok) {
+        const errJson = await insertRes.json().catch(() => ({}));
+        setMessage(`حدث خطأ أثناء إضافة المنتج: ${errJson.error || ""}`);
         setSaving(false);
         return;
       }
-  if (insertedProduct && additionalImageFiles.length > 0) {
-    for (const file of additionalImageFiles) {
-      const extension =
-        file.name.split(".").pop()?.toLowerCase() || "jpg";
-
-      const fileName = `${crypto.randomUUID()}.${extension}`;
-      const filePath = `products/additional/${fileName}`;
-
-      const { error: additionalUploadError } = await supabase.storage
-        .from("product-images")
-        .upload(filePath, file, {
-          cacheControl: "3600",
-          upsert: false,
-        });
-
-      if (additionalUploadError) {
-        console.error(
-          "خطأ في رفع صورة إضافية:",
-          additionalUploadError.message
-        );
-        continue;
-      }
-
-      const {
-        data: { publicUrl },
-      } = supabase.storage
-        .from("product-images")
-        .getPublicUrl(filePath);
-
-      const { error: imageInsertError } = await supabase
-        .from("product_images")
-        .insert({
-          product_id: insertedProduct.id,
-          image_url: publicUrl,
-        });
-
-      if (imageInsertError) {
-        console.error(
-          "خطأ في حفظ الصورة الإضافية:",
-          imageInsertError.message
-        );
-
-        await supabase.storage
-          .from("product-images")
-          .remove([filePath]);
-      }
-    }
-  }
       setName("");
       setCategoryId("");
       setDescription("");
@@ -296,15 +219,13 @@ setAdditionalPreviewUrls([]);
 
     setMessage("");
 
-    const { error } = await supabase
-      .from("products")
-      .delete()
-      .eq("id", product.id);
+    const res = await fetch(`/api/admin/products?id=${encodeURIComponent(product.id)}`, {
+      method: "DELETE",
+    });
 
-    if (error) {
-      setMessage(
-        `حدث خطأ أثناء حذف المنتج: ${error.message}`
-      );
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      setMessage(`حدث خطأ أثناء حذف المنتج: ${errJson.error || ""}`);
       return;
     }
 

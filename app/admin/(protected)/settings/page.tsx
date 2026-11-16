@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase-client";
 
 type Settings = {
   company_name: string;
@@ -30,8 +29,6 @@ const defaultSettings: Settings = {
 };
 
 export default function SettingsPage() {
-  const supabase = createClient();
-
   const [settings, setSettings] =
     useState<Settings>(defaultSettings);
 
@@ -47,33 +44,31 @@ export default function SettingsPage() {
     setLoading(true);
     setMessage("");
 
-    const { data, error } = await supabase
-      .from("site_settings")
-      .select(
-        "company_name, phone_1, phone_2, landline, whatsapp, address, description, maps_url, whatsapp_business, instagram_url"
-      )
-      .eq("id", 1)
-      .single();
+    try {
+      const res = await fetch("/api/admin/settings", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) {
+        setMessage("حدث خطأ أثناء تحميل الإعدادات.");
+        setLoading(false);
+        return;
+      }
 
-    if (error) {
-      console.error(error);
+      const data = json.data || {};
+      setSettings({
+        company_name: data.company_name || "",
+        phone_1: data.phone_1 || "",
+        phone_2: data.phone_2 || "",
+        landline: data.landline || "",
+        whatsapp: data.whatsapp || "",
+        address: data.address || "",
+        description: data.description || "",
+        maps_url: data.maps_url || "",
+        whatsapp_business: data.whatsapp_business || "",
+        instagram_url: data.instagram_url || "",
+      });
+    } catch {
       setMessage("حدث خطأ أثناء تحميل الإعدادات.");
-      setLoading(false);
-      return;
     }
-
-    setSettings({
-      company_name: data.company_name || "",
-      phone_1: data.phone_1 || "",
-      phone_2: data.phone_2 || "",
-      landline: data.landline || "",
-      whatsapp: data.whatsapp || "",
-      address: data.address || "",
-      description: data.description || "",
-      maps_url: data.maps_url || "",
-      whatsapp_business: data.whatsapp_business || "",
-      instagram_url: data.instagram_url || "",
-    });
 
     setLoading(false);
   }
@@ -92,31 +87,23 @@ export default function SettingsPage() {
     setSaving(true);
     setMessage("");
 
-    const { error } = await supabase
-      .from("site_settings")
-      .update({
-        company_name: settings.company_name.trim(),
-        phone_1: settings.phone_1.trim(),
-        phone_2: settings.phone_2.trim(),
-        landline: settings.landline.trim(),
-        whatsapp: settings.whatsapp.trim(),
-        address: settings.address.trim(),
-        description: settings.description.trim(),
-        maps_url: settings.maps_url.trim(),
-        whatsapp_business: settings.whatsapp_business.trim(),
-        instagram_url: settings.instagram_url.trim(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", 1);
+    try {
+      const res = await fetch("/api/admin/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(settings),
+      });
 
-    if (error) {
-      console.error(error);
+      if (!res.ok) {
+        setMessage("حدث خطأ أثناء حفظ الإعدادات.");
+        setSaving(false);
+        return;
+      }
+
+      setMessage("تم حفظ الإعدادات بنجاح ✓");
+    } catch {
       setMessage("حدث خطأ أثناء حفظ الإعدادات.");
-      setSaving(false);
-      return;
     }
-
-    setMessage("تم حفظ الإعدادات بنجاح ✓");
     setSaving(false);
   }
 

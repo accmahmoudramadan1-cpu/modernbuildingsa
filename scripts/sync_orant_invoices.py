@@ -704,6 +704,128 @@ def check_extra_onyx_info():
         print(f"[!] خطأ أثناء الفحص الإضافي: {err}")
 
 
+def find_onyx_pdf_locations():
+    """البحث الذكي عبر السيرفر وقاعدة بيانات أوراكل لاكتشاف مجلد تصدير ملفات PDF من أونكس"""
+    print("=" * 70)
+    print("  جاري البحث التلقائي عن مكان تصدير ملفات PDF الصادرة من Onyx Pro")
+    print("=" * 70)
+
+    sample_doc_nos = set()
+    attch_dirs = set()
+
+    conn = get_oracle_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT TO_CHAR(BILL_NO) FROM (SELECT BILL_NO FROM IAS_BILL_MST ORDER BY BILL_DATE DESC, BILL_NO DESC) WHERE ROWNUM <= 30")
+            for (bno,) in cur.fetchall():
+                if bno and len(str(bno).strip()) >= 4:
+                    sample_doc_nos.add(str(bno).strip().lower())
+
+            cur.execute("SELECT TO_CHAR(QUOT_NO) FROM (SELECT QUOT_NO FROM QUOTATION ORDER BY QUOT_DATE DESC, QUOT_NO DESC) WHERE ROWNUM <= 20")
+            for (qno,) in cur.fetchall():
+                if qno and len(str(qno).strip()) >= 3:
+                    sample_doc_nos.add(str(qno).strip().lower())
+
+            cur.execute("SELECT ATTCH_EMAIL_FILE FROM (SELECT ATTCH_EMAIL_FILE FROM IAS_MSG_SMS_DTL WHERE ATTCH_EMAIL_FILE IS NOT NULL ORDER BY MSG_NO DESC) WHERE ROWNUM <= 20")
+            for (apath,) in cur.fetchall():
+                if apath:
+                    p = str(apath).strip().strip('"')
+                    print(f"  [Oracle ATTCH_EMAIL_FILE] {p}")
+                    parent = os.path.dirname(p)
+                    if parent:
+                        attch_dirs.add(parent)
+            cur.close()
+            conn.close()
+        except Exception as err:
+            print(f"  [!] تنبيه أثناء جلب أرقام العينات من أوراكل: {err}")
+
+    skip_dir_names = {
+        "windows", "program files", "program files (x86)", "programdata", "$recycle.bin",
+        "system volume information", "appdata", "node_modules", ".git", "recovery", "perflogs",
+    }
+    search_roots = []
+    for drv in ("C:\\", "D:\\", "E:\\", "F:\\"):
+        if os.path.isdir(drv):
+            search_roots.append(drv)
+    for home_sub in ("Documents", "Desktop", "Downloads"):
+        hp = os.path.join(os.path.expanduser("~"), home_sub)
+        if os.path.isdir(hp):
+            search_roots.append(hp)
+
+    matched_folders = {}
+    recent_pdf_folders = {}
+    cutoff_ts = time.time() - (30 * 86400)
+
+    print(f"[*] فحص المجلدات في: {', '.join(search_roots)} ...")
+    for root_base in search_roots:
+        base_depth = root_base.rstrip("\\/").count(os.sep)
+        for root, dirs, files in os.walk(root_base):
+            dirs[:] = [
+                d for d in dirs
+                if d.lower() not in skip_dir_names and not d.startswith(".")
+            ]
+            if root.rstrip("\\/").count(os.sep) - base_depth >= 4:
+                dirs[:] = []
+
+            folder_low = root.lower()
+            is_onyx_named = any(k in folder_low for k in ("onyx", "orant", "ys_", "yemensoft", "bill", "invoice", "quot", "pdf", "attch"))
+
+            for fname in files:
+                if not fname.lower().endswith(".pdf"):
+                    continue
+                full_p = os.path.join(root, fname)
+                stem = os.path.splitext(fname)[0].lower()
+                try:
+                    mtime = os.path.getmtime(full_p)
+                except OSError:
+                    mtime = 0
+
+                if any(tok in stem for tok in sample_doc_nos if len(tok) >= 5):
+                    matched_folders.setdefault(root, []).append(fname)
+                elif mtime >= cutoff_ts or is_onyx_named:
+                    recent_pdf_folders.setdefault(root, 0)
+                    recent_pdf_folders[root] += 1
+
+    print("\n" + "=" * 70)
+    if attch_dirs:
+        print("[+] مجلدات مسجلة داخل جدول المرفقات في أوراكل (ATTCH_EMAIL_FILE):")
+        for d in sorted(attch_dirs):
+            print(f"    -> {d}")
+
+    if matched_folders:
+        print("\n[✓] تم العثور على مجلدات تحتوي بالفعل على ملفات PDF تطابق أرقام فواتير/عروض أونكس!")
+        best_dirs = sorted(matched_folders.keys(), key=lambda k: len(matched_folders[k]), reverse=True)
+        for d in best_dirs[:8]:
+            samples = ", ".join(matched_folders[d][:3])
+            print(f"    * {d}  ({len(matched_folders[d])} ملف مطابق، مثال: {samples})")
+        print("\n[+] انسخ هذا السطر وضعه داخل ملف run_sync_service.bat:")
+        print(f"    set ORACLE_PDF_EXPORT_DIR={best_dirs[0]}")
+    elif recent_pdf_folders:
+        print("\n[i] مجلدات تحتوي على ملفات PDF حديثة أو مرتبطة بأسماء أونكس:")
+        top_recent = sorted(recent_pdf_folders.items(), key=lambda kv: kv[1], reverse=True)[:10]
+        for d, cnt in top_recent:
+            print(f"    * {d}  ({cnt} ملف PDF)")
+    else:
+        print("[i] لم يتم العثور على ملفات PDF حديثة على الأقراص المحلية؛ غالباً تحفظ في مجلد شبكة مثل \\\\onyxserver\\...")
+    print("=" * 70)
+
+
+def _auto_detect_default_pdf_dirs() -> str:
+    """محاولة تلقائية سريعة لاكتشاف مجلد تصدير PDF المحلي إذا لم يُحدد ORACLE_PDF_EXPORT_DIR"""
+    if PDF_EXPORT_DIR:
+        return PDF_EXPORT_DIR
+    candidates = []
+    for path_guess in (
+        r"C:\OnyxPDF", r"D:\OnyxPDF", r"C:\PDF", r"D:\PDF",
+        r"C:\OnyxPro\PDF", r"D:\OnyxPro\PDF", r"C:\YemenSoft\PDF", r"D:\YemenSoft\PDF",
+        r"\\onyxserver\OnyxPDF", r"\\onyxserver\PDF",
+    ):
+        if os.path.isdir(path_guess):
+            candidates.append(path_guess)
+    return ";".join(candidates)
+
+
 def _build_pdf_index(export_dirs_str: str) -> list:
     """فهرسة ملفات PDF من مجلدات تصدير أونكس (بعمق أقصى 3 مجلدات، مرتبة من الأحدث للأقدم)"""
     entries = []
@@ -1057,6 +1179,7 @@ def main():
     parser = argparse.ArgumentParser(description="Onyx Pro / OraNT Multi-Template Sync Tool")
     parser.add_argument("--discover", action="store_true", help="فحص وعرض أسماء الجداول الفعلية في قاعدة أوراكل")
     parser.add_argument("--check-extra", action="store_true", help="فحص اعتماد عروض الأسعار ومسارات ملفات PDF")
+    parser.add_argument("--find-pdfs", action="store_true", help="البحث التلقائي على الأقراص وأوراكل لاكتشاف مجلد تصدير PDF")
     parser.add_argument("--mock", action="store_true", help="تشغيل وضع التجربة وإرسال عينات لجميع القوالب الـ 8")
     parser.add_argument("--url", default=API_ENDPOINT, help="رابط الخادم المستقبل للعمليات")
     parser.add_argument("--upload-pdf-url", default=UPLOAD_PDF_ENDPOINT, help="رابط رفع ملفات PDF الأصلية من أونكس")
@@ -1072,12 +1195,18 @@ def main():
         check_extra_onyx_info()
         return
 
+    if args.find_pdfs:
+        find_onyx_pdf_locations()
+        return
+
+    active_pdf_dirs = _auto_detect_default_pdf_dirs()
+
     init_tracker_db()
     print("=" * 70)
     print("  بدء تشغيل أداة مزامنة Onyx Pro / OraNT مع modernbuildingsa.com/whatsapp")
     print(f"  الوجهة: {args.url}")
-    if PDF_EXPORT_DIR:
-        print(f"  مجلد PDF: {PDF_EXPORT_DIR}")
+    if active_pdf_dirs:
+        print(f"  مجلد PDF: {active_pdf_dirs}")
     print("=" * 70)
 
     while True:
@@ -1094,8 +1223,8 @@ def main():
             # Upload matching local Onyx PDFs (from ATTCH_EMAIL_FILE or ORACLE_PDF_EXPORT_DIR)
             if not args.mock:
                 has_attch = any(doc.get("_attch_path") for doc in new_docs)
-                if PDF_EXPORT_DIR or has_attch:
-                    pdf_index = _build_pdf_index(PDF_EXPORT_DIR)
+                if active_pdf_dirs or has_attch:
+                    pdf_index = _build_pdf_index(active_pdf_dirs)
                     for doc in new_docs:
                         attch_path = doc.pop("_attch_path", None)
                         local_pdf = _find_local_onyx_pdf(doc["invoice_number"], attch_path, pdf_index)

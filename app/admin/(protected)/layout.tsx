@@ -1,22 +1,18 @@
-import { createClient } from "@/lib/supabase-server";
+import { getAdminSession } from "@/lib/admin-auth";
 import { redirect } from "next/navigation";
+
+export const dynamic = "force-dynamic";
 
 export default async function ProtectedAdminLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
+  const session = await getAdminSession();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!session) {
     redirect("/admin/login");
   }
 
   return <>{children}</>;
 }
-
-

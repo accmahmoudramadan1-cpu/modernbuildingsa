@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase-client";
 
 type Order = {
   id: string;
@@ -54,8 +53,6 @@ function getWhatsAppLink(phone: string) {
   return `https://wa.me/966${cleaned}`;
 }
 export default function OrdersPage() {
-  const supabase = createClient();
-
   const [orders, setOrders] = useState<OrderWithItems[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -63,50 +60,18 @@ export default function OrdersPage() {
   async function loadOrders() {
     setLoading(true);
 
-    const { data: ordersData, error: ordersError } = await supabase
-      .from("orders")
-      .select(
-        "id, customer_name, phone, whatsapp, address, notes, status, created_at"
-      )
-      .order("created_at", { ascending: false });
-
-    if (ordersError) {
-      console.error(ordersError);
-      setMessage("حدث خطأ أثناء تحميل الطلبات.");
-      setLoading(false);
-      return;
-    }
-
-    const orderIds = (ordersData || []).map((order) => order.id);
-
-    let itemsData: OrderItem[] = [];
-
-    if (orderIds.length > 0) {
-      const { data, error: itemsError } = await supabase
-        .from("order_items")
-        .select(
-          "id, order_id, product_name, quantity, price, currency"
-        )
-        .in("order_id", orderIds);
-
-      if (itemsError) {
-        console.error(itemsError);
-        setMessage("تم تحميل الطلبات لكن حدث خطأ في تفاصيل المنتجات.");
-      } else {
-        itemsData = data || [];
+    try {
+      const res = await fetch("/api/admin/orders", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) {
+        setMessage("حدث خطأ أثناء تحميل الطلبات.");
+        setLoading(false);
+        return;
       }
+      setOrders(json.data || []);
+    } catch {
+      setMessage("حدث خطأ أثناء تحميل الطلبات.");
     }
-
-    const combinedOrders: OrderWithItems[] = (ordersData || []).map(
-      (order) => ({
-        ...order,
-        items: itemsData.filter(
-          (item) => item.order_id === order.id
-        ),
-      })
-    );
-
-    setOrders(combinedOrders);
     setLoading(false);
   }
 
@@ -117,26 +82,30 @@ export default function OrdersPage() {
   async function updateStatus(orderId: string, status: string) {
     setMessage("");
 
-    const { error } = await supabase
-      .from("orders")
-      .update({ status })
-      .eq("id", orderId);
+    try {
+      const res = await fetch("/api/admin/orders", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: orderId, status }),
+      });
 
-    if (error) {
-      console.error(error);
+      if (!res.ok) {
+        setMessage("حدث خطأ أثناء تحديث حالة الطلب.");
+        return;
+      }
+
+      setOrders((currentOrders) =>
+        currentOrders.map((order) =>
+          order.id === orderId
+            ? { ...order, status }
+            : order
+        )
+      );
+
+      setMessage("تم تحديث حالة الطلب بنجاح.");
+    } catch {
       setMessage("حدث خطأ أثناء تحديث حالة الطلب.");
-      return;
     }
-
-    setOrders((currentOrders) =>
-      currentOrders.map((order) =>
-        order.id === orderId
-          ? { ...order, status }
-          : order
-      )
-    );
-
-    setMessage("تم تحديث حالة الطلب بنجاح.");
   }
 
   async function deleteOrder(orderId: string) {
@@ -146,22 +115,24 @@ export default function OrdersPage() {
 
     if (!confirmed) return;
 
-    const { error } = await supabase
-      .from("orders")
-      .delete()
-      .eq("id", orderId);
+    try {
+      const res = await fetch(`/api/admin/orders?id=${encodeURIComponent(orderId)}`, {
+        method: "DELETE",
+      });
 
-    if (error) {
-      console.error(error);
+      if (!res.ok) {
+        setMessage("حدث خطأ أثناء حذف الطلب.");
+        return;
+      }
+
+      setOrders((currentOrders) =>
+        currentOrders.filter((order) => order.id !== orderId)
+      );
+
+      setMessage("تم حذف الطلب.");
+    } catch {
       setMessage("حدث خطأ أثناء حذف الطلب.");
-      return;
     }
-
-    setOrders((currentOrders) =>
-      currentOrders.filter((order) => order.id !== orderId)
-    );
-
-    setMessage("تم حذف الطلب.");
   }
 
   return (

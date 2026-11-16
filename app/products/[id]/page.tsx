@@ -1,8 +1,10 @@
-import { createClient } from "@/lib/supabase-server";
+import { isMysqlConfigured, queryRows } from "@/lib/mysql";
 import NextImage from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ProductGallery from "@/components/ProductGallery";
+
+export const dynamic = "force-dynamic";
 
 type Product = {
   id: string;
@@ -27,25 +29,27 @@ export default async function ProductPage({
 }) {
   const { id } = await params;
 
-  const supabase = await createClient();
+  let product: any = null;
+  let additionalImages: any[] = [];
 
-  const { data: product } = await supabase
-    .from("products")
-    .select(
-      "id, name, description, price, currency, show_price, image_url, available"
-    )
-    .eq("id", id)
-    .single();
+  if (isMysqlConfigured()) {
+    const productRows = await queryRows<any>(
+      `SELECT id, name, description, price, currency, show_price, image_url, available
+       FROM products WHERE id = ? LIMIT 1`,
+      [id]
+    );
+    product = productRows[0] || null;
+    if (product) {
+      additionalImages = await queryRows<any>(
+        `SELECT id, image_url FROM product_images WHERE product_id = ? ORDER BY created_at ASC`,
+        [id]
+      );
+    }
+  }
 
   if (!product) {
     notFound();
   }
-
-  const { data: additionalImages } = await supabase
-    .from("product_images")
-    .select("id, image_url")
-    .eq("product_id", id)
-    .order("created_at", { ascending: true });
 
   const safeProduct = product as Product;
   const safeAdditionalImages: ProductImage[] =

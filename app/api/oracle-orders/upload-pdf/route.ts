@@ -1,66 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { executeSql, isMysqlConfigured } from "@/lib/mysql";
 
 export const dynamic = "force-dynamic";
 
-const PDF_BUCKET = "oracle-pdfs";
-const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB limit for WhatsApp Document API & free tier protection
+const MAX_PDF_BYTES = 10 * 1024 * 1024; // 10 MB limit for WhatsApp Document API
 const RETENTION_DAYS = 7;
-
-function getStorageSupabaseClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key || url.includes("placeholder-url")) {
-    return null;
-  }
-
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
-async function cleanupExpiredPdfFolders(
-  supabase: NonNullable<ReturnType<typeof getStorageSupabaseClient>>
-) {
-  try {
-    const { data: rootItems, error } = await supabase.storage
-      .from(PDF_BUCKET)
-      .list("", { limit: 100 });
-
-    if (error || !Array.isArray(rootItems)) return;
-
-    const cutoffMs = Date.now() - RETENTION_DAYS * 86400 * 1000;
-    for (const item of rootItems) {
-      if (!item?.name || !/^\d{4}-\d{2}-\d{2}$/.test(item.name)) continue;
-      const folderTime = Date.parse(item.name);
-      if (Number.isNaN(folderTime) || folderTime >= cutoffMs) continue;
-
-      const { data: nestedFiles } = await supabase.storage
-        .from(PDF_BUCKET)
-        .list(item.name, { limit: 200 });
-
-      if (Array.isArray(nestedFiles) && nestedFiles.length > 0) {
-        const pathsToRemove = nestedFiles
-          .filter((f) => f?.name)
-          .map((f) => `${item.name}/${f.name}`);
-        if (pathsToRemove.length > 0) {
-          await supabase.storage.from(PDF_BUCKET).remove(pathsToRemove);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn("[Upload PDF] Non-fatal retention cleanup warning:", err);
-  }
-}
 
 /**
  * POST /api/oracle-orders/upload-pdf
- * Uploads an authentic Onyx Pro PDF binary exported on the client server into
- * Supabase Storage (`oracle-pdfs` bucket, 1 GB free file quota) and returns its public HTTPS URL.
+ * Stores authentic Onyx Pro PDF files directly inside Hostinger MySQL (`oracle_pdfs`)
+ * and returns a public HTTPS URL (/api/oracle-orders/pdf/<invoiceNumber>) for Meta Cloud API.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -79,6 +28,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const invoiceNumber = String(body?.invoiceNumber || "").trim();
+    const filename = String(body?.filename || "").trim() || `${invoiceNumber}.pdf`;
     const contentBase64 = String(body?.contentBase64 || "").trim();
 
     if (!invoiceNumber || !contentBase64) {
@@ -108,55 +58,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const supabase = getStorageSupabaseClient();
-    if (!supabase) {
+    if (!isMysqlConfigured()) {
       return NextResponse.json(
-        { success: false, error: "Supabase Storage is not configured on the server." },
+        { success: false, error: "MySQL database is not configured on the server." },
         { status: 500 }
       );
     }
 
-    const dateFolder = new Date().toISOString().slice(0, 10);
-    const safeName = invoiceNumber.replace(/[^A-Za-z0-9_-]/g, "_") || `doc_${Date.now()}`;
-    const objectPath = `${dateFolder}/${safeName}.pdf`;
+    const safeName = filename.replace(/[^A-Za-z0-9_.-]/g, "_") || `${invoiceNumber}.pdf`;
 
-    let { error: uploadError } = await supabase.storage
-      .from(PDF_BUCKET)
-      .upload(objectPath, pdfBuffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
+    await executeSql(
+      `INSERT INTO oracle_pdfs (invoice_number, filename, mime_type, pdf_data, size_bytes, created_at)
+       VALUES (?, ?, 'application/pdf', ?, ?, NOW(3))
+       ON DUPLICATE KEY UPDATE
+         filename = VALUES(filename),
+         pdf_data = VALUES(pdf_data),
+         size_bytes = VALUES(size_bytes),
+         created_at = NOW(3)`,
+      [invoiceNumber, safeName, pdfBuffer, pdfBuffer.length]
+    );
 
-    // If bucket doesn't exist yet and service role is available, attempt to create it automatically
-    if (uploadError && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      await supabase.storage.createBucket(PDF_BUCKET, { public: true }).catch(() => null);
-      const retry = await supabase.storage.from(PDF_BUCKET).upload(objectPath, pdfBuffer, {
-        contentType: "application/pdf",
-        upsert: true,
-      });
-      uploadError = retry.error;
-    }
+    // Opportunistically clean up PDFs older than 7 days to keep Hostinger MySQL lean
+    await executeSql(
+      `DELETE FROM oracle_pdfs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)`,
+      [RETENTION_DAYS]
+    ).catch((err) => console.warn("[Upload PDF] Retention cleanup warning:", err));
 
-    if (uploadError) {
-      console.error("[API /api/oracle-orders/upload-pdf] Storage error:", uploadError);
-      return NextResponse.json(
-        {
-          success: false,
-          error: `Storage upload failed (${uploadError.message}). Ensure supabase/oracle_pdfs_bucket.sql has been executed in Supabase SQL Editor.`,
-        },
-        { status: 502 }
-      );
-    }
-
-    const { data: publicData } = supabase.storage.from(PDF_BUCKET).getPublicUrl(objectPath);
-
-    // Opportunistically purge expired PDF folders (> 7 days) to keep free storage clean
-    await cleanupExpiredPdfFolders(supabase);
+    const publicBaseUrl =
+      process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com";
+    const publicUrl = `${publicBaseUrl}/api/oracle-orders/pdf/${encodeURIComponent(invoiceNumber)}`;
 
     return NextResponse.json({
       success: true,
-      url: publicData.publicUrl,
-      path: objectPath,
+      url: publicUrl,
       sizeBytes: pdfBuffer.length,
     });
   } catch (error: any) {

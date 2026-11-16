@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase-client";
 
 type Category = {
   id: string;
@@ -12,8 +11,6 @@ type Category = {
 };
 
 export default function CategoriesPage() {
-  const supabase = createClient();
-
   const [categories, setCategories] = useState<Category[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -32,18 +29,19 @@ const [editPreviewUrl, setEditPreviewUrl] = useState("");
   async function loadCategories() {
     setLoading(true);
 
-    const { data, error } = await supabase
-      .from("categories")
-      .select("*")
-      .order("created_at", { ascending: false });
+    try {
+      const res = await fetch("/api/admin/categories", { cache: "no-store" });
+      const json = await res.json();
+      if (!res.ok) {
+        setMessage("حدث خطأ أثناء تحميل الأقسام");
+        setLoading(false);
+        return;
+      }
 
-    if (error) {
+      setCategories(json.data || []);
+    } catch {
       setMessage("حدث خطأ أثناء تحميل الأقسام");
-      setLoading(false);
-      return;
     }
-
-    setCategories(data || []);
     setLoading(false);
   }
 
@@ -84,57 +82,35 @@ const [editPreviewUrl, setEditPreviewUrl] = useState("");
     setSaving(true);
     setMessage("");
 
-    let uploadedImagePath: string | null = null;
     let imageUrl: string | null = null;
 
     try {
       // رفع الصورة إذا تم اختيار صورة
       if (imageFile) {
-        const fileExtension =
-          imageFile.name.split(".").pop()?.toLowerCase() || "jpg";
-
-        const fileName = `${crypto.randomUUID()}.${fileExtension}`;
-        const filePath = `categories/${fileName}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from("product-images")
-          .upload(filePath, imageFile, {
-            cacheControl: "3600",
-            upsert: false,
-          });
-
-        if (uploadError) {
+        const fd = new FormData();
+        fd.append("file", imageFile);
+        const upRes = await fetch("/api/admin/upload", { method: "POST", body: fd });
+        const upJson = await upRes.json();
+        if (!upRes.ok || !upJson.url) {
           setMessage("حدث خطأ أثناء رفع الصورة");
           setSaving(false);
           return;
         }
-
-        uploadedImagePath = filePath;
-
-        const { data: publicUrlData } = supabase.storage
-          .from("product-images")
-          .getPublicUrl(filePath);
-
-        imageUrl = publicUrlData.publicUrl;
+        imageUrl = upJson.url;
       }
 
       // إضافة القسم إلى قاعدة البيانات
-      const { error: insertError } = await supabase
-        .from("categories")
-        .insert({
+      const res = await fetch("/api/admin/categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: name.trim(),
           description: description.trim() || null,
           image_url: imageUrl,
-        });
+        }),
+      });
 
-      if (insertError) {
-        // لو حصل خطأ في قاعدة البيانات، نحذف الصورة التي رفعناها
-        if (uploadedImagePath) {
-          await supabase.storage
-            .from("product-images")
-            .remove([uploadedImagePath]);
-        }
-
+      if (!res.ok) {
         setMessage("حدث خطأ أثناء إضافة القسم");
         setSaving(false);
         return;
@@ -207,55 +183,35 @@ async function updateCategory(e: React.FormEvent) {
   setMessage("");
 
   let newImageUrl = editingCategory.image_url;
-  let uploadedImagePath: string | null = null;
 
   try {
     if (editImageFile) {
-      const fileExtension =
-        editImageFile.name.split(".").pop()?.toLowerCase() || "jpg";
-
-      const fileName = `${crypto.randomUUID()}.${fileExtension}`;
-      const filePath = `categories/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("product-images")
-        .upload(filePath, editImageFile, {
-          cacheControl: "3600",
-          upsert: false,
-        });
-
-      if (uploadError) {
+      const fd = new FormData();
+      fd.append("file", editImageFile);
+      const upRes = await fetch("/api/admin/upload", { method: "POST", body: fd });
+      const upJson = await upRes.json();
+      if (!upRes.ok || !upJson.url) {
         setMessage("حدث خطأ أثناء رفع الصورة الجديدة");
         setSaving(false);
         return;
       }
-
-      uploadedImagePath = filePath;
-
-      const { data: publicUrlData } = supabase.storage
-        .from("product-images")
-        .getPublicUrl(filePath);
-
-      newImageUrl = publicUrlData.publicUrl;
+      newImageUrl = upJson.url;
     }
 
-    const { error: updateError } = await supabase
-      .from("categories")
-      .update({
+    const res = await fetch("/api/admin/categories", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: editingCategory.id,
         name: editName.trim(),
         description: editDescription.trim() || null,
         image_url: newImageUrl,
-      })
-      .eq("id", editingCategory.id);
+      }),
+    });
 
-    if (updateError) {
-      if (uploadedImagePath) {
-        await supabase.storage
-          .from("product-images")
-          .remove([uploadedImagePath]);
-      }
-
-      setMessage(`حدث خطأ أثناء تعديل القسم: ${updateError.message}`);
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      setMessage(`حدث خطأ أثناء تعديل القسم: ${errJson.error || ""}`);
       setSaving(false);
       return;
     }
@@ -279,12 +235,11 @@ async function updateCategory(e: React.FormEvent) {
 
     setMessage("");
 
-    const { error } = await supabase
-      .from("categories")
-      .delete()
-      .eq("id", category.id);
+    const res = await fetch(`/api/admin/categories?id=${encodeURIComponent(category.id)}`, {
+      method: "DELETE",
+    });
 
-    if (error) {
+    if (!res.ok) {
       setMessage("حدث خطأ أثناء حذف القسم");
       return;
     }

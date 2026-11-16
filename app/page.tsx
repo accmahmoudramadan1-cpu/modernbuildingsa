@@ -1,7 +1,9 @@
 import NextImage from "next/image";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase-server";
+import { isMysqlConfigured, queryRows } from "@/lib/mysql";
 import { STORE_CATEGORIES } from "@/lib/categories-data";
+
+export const dynamic = "force-dynamic";
 
 type SiteSettings = {
   company_name: string | null;
@@ -18,22 +20,27 @@ type SiteSettings = {
 };
 
 export default async function Home() {
-  const supabase = await createClient();
+  let categories: any[] = [];
+  let siteSettings: any = null;
 
-  const [{ data: categories }, { data: siteSettings }] =
-    await Promise.all([
-      supabase
-        .from("categories")
-        .select("id, name, description, image_url")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("site_settings")
-        .select(
-          "company_name, phone_1, phone_2, landline, whatsapp, address, description, maps_url, whatsapp_business, instagram_url, email"
-        )
-        .eq("id", 1)
-        .maybeSingle(),
-    ]);
+  if (isMysqlConfigured()) {
+    try {
+      const [catRows, settingsRows] = await Promise.all([
+        queryRows<any>(
+          "SELECT id, name, description, image_url FROM categories ORDER BY created_at DESC"
+        ),
+        queryRows<any>(
+          `SELECT company_name, phone_1, phone_2, landline, whatsapp, address,
+                  description, maps_url, whatsapp_business, instagram_url, email
+           FROM site_settings WHERE id = 1 LIMIT 1`
+        ),
+      ]);
+      categories = catRows;
+      siteSettings = settingsRows[0] || null;
+    } catch (err) {
+      console.warn("[Home] MySQL read error, falling back to static catalog:", err);
+    }
+  }
 
   // Display Categories using curated categories catalog (Excluded: عدد وآلات)
   const displayCategories = STORE_CATEGORIES.map((storeCat) => {

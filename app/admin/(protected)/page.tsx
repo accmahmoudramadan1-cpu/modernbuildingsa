@@ -1,23 +1,22 @@
-import { createClient } from "@/lib/supabase-server";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import { ADMIN_COOKIE_NAME, getAdminSession } from "@/lib/admin-auth";
+
+export const dynamic = "force-dynamic";
+
 export default async function AdminPage() {
-  const supabase = await createClient();
+  const session = await getAdminSession();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
+  if (!session) {
     redirect("/admin/login");
   }
 
   async function handleLogout() {
     "use server";
 
-    const supabase = await createClient();
-
-    await supabase.auth.signOut();
+    const cookieStore = await cookies();
+    cookieStore.delete(ADMIN_COOKIE_NAME);
 
     redirect("/admin/login");
   }

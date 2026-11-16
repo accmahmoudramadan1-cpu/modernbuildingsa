@@ -1,4 +1,5 @@
-import { createClient as createSupabaseServerClient } from "@/lib/supabase-server";
+import crypto from "crypto";
+import { executeSql, isMysqlConfigured, queryRows } from "@/lib/mysql";
 import { normalizePaymentMethod, type OnyxDocType } from "@/lib/onyx-templates";
 
 export interface OracleInvoice {
@@ -175,26 +176,42 @@ let memoryInvoicesCache: OracleInvoice[] = [
   },
 ];
 
+function toMysqlDateTime(isoOrDate?: string | null): string {
+  const d = isoOrDate ? new Date(isoOrDate) : new Date();
+  const valid = Number.isNaN(d.getTime()) ? new Date() : d;
+  return valid.toISOString().slice(0, 23).replace("T", " ");
+}
+
 /**
  * Get all imported Oracle documents/invoices
  */
 export async function getOracleInvoices(): Promise<OracleInvoice[]> {
-  try {
-    const supabase = await createSupabaseServerClient();
-    const { data, error } = await supabase
-      .from("oracle_invoices")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (!error && Array.isArray(data) && data.length > 0) {
-      return data.map((row: any) => ({
-        ...row,
-        doc_type: (row.doc_type || "cash_invoice") as OnyxDocType,
-        payment_method: normalizePaymentMethod(row.payment_method),
-      })) as OracleInvoice[];
+  if (isMysqlConfigured()) {
+    try {
+      const rows = await queryRows<any>(
+        `SELECT id, invoice_number, doc_type, customer_code, customer_name, phone,
+                invoice_date, amount, currency, remaining_balance, payment_method,
+                attachment_url, onyx_form_code, details, status, whatsapp_message_id,
+                sent_at, created_at, updated_at
+         FROM oracle_invoices
+         ORDER BY created_at DESC`
+      );
+      if (rows.length > 0) {
+        return rows.map((row: any) => ({
+          ...row,
+          amount: Number(row.amount ?? 0),
+          remaining_balance:
+            row.remaining_balance !== null && row.remaining_balance !== undefined
+              ? Number(row.remaining_balance)
+              : null,
+          doc_type: (row.doc_type || "cash_invoice") as OnyxDocType,
+          payment_method: normalizePaymentMethod(row.payment_method),
+        })) as OracleInvoice[];
+      }
+      return [];
+    } catch (err) {
+      console.warn("[OracleInvoices] MySQL query failed, using memory cache:", err);
     }
-  } catch (err) {
-    console.warn("[OracleInvoices] Supabase query skipped or failed, using memory cache.");
   }
 
   return memoryInvoicesCache.map((row) => ({
@@ -259,7 +276,7 @@ export async function upsertOracleInvoices(
   const formatted = Array.from(dedupedMap.values());
   const incomingNumbers = formatted.map((f) => f.invoice_number);
 
-  // Check existing records in memory cache and Supabase so already-sent invoices stay "sent"
+  // Check existing records in memory cache and MySQL so already-sent invoices stay "sent"
   const existingMap = new Map<
     string,
     { status: OracleInvoice["status"]; whatsapp_message_id?: string | null; sent_at?: string | null }
@@ -274,18 +291,19 @@ export async function upsertOracleInvoices(
     }
   }
 
-  let supabaseClient: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
-  try {
-    supabaseClient = await createSupabaseServerClient();
-    for (let i = 0; i < incomingNumbers.length; i += 200) {
-      const chunk = incomingNumbers.slice(i, i + 200);
-      const { data: existingRows, error: selectErr } = await supabaseClient
-        .from("oracle_invoices")
-        .select("invoice_number, status, whatsapp_message_id, sent_at")
-        .in("invoice_number", chunk);
-
-      if (!selectErr && Array.isArray(existingRows)) {
-        for (const row of existingRows as any[]) {
+  const mysqlReady = isMysqlConfigured();
+  if (mysqlReady) {
+    try {
+      for (let i = 0; i < incomingNumbers.length; i += 200) {
+        const chunk = incomingNumbers.slice(i, i + 200);
+        const placeholders = chunk.map(() => "?").join(", ");
+        const existingRows = await queryRows<any>(
+          `SELECT invoice_number, status, whatsapp_message_id, sent_at
+           FROM oracle_invoices
+           WHERE invoice_number IN (${placeholders})`,
+          chunk
+        );
+        for (const row of existingRows) {
           existingMap.set(String(row.invoice_number), {
             status: (row.status || "pending") as OracleInvoice["status"],
             whatsapp_message_id: row.whatsapp_message_id ?? null,
@@ -293,9 +311,9 @@ export async function upsertOracleInvoices(
           });
         }
       }
+    } catch (err: any) {
+      console.warn("[OracleInvoices] MySQL pre-upsert lookup skipped:", err?.message);
     }
-  } catch (err: any) {
-    console.warn("[OracleInvoices] Pre-upsert lookup skipped:", err?.message);
   }
 
   const newlyInserted: OracleInvoice[] = [];
@@ -312,17 +330,59 @@ export async function upsertOracleInvoices(
     }
   }
 
-  // Omit id so PostgreSQL uses DEFAULT gen_random_uuid() on insert and preserves existing id on conflict
-  const supabasePayload = formatted.map(({ id: _omitId, ...rest }) => rest);
-
-  // Try saving to Supabase first
-  try {
-    const supabase = supabaseClient ?? (await createSupabaseServerClient());
-    const { error } = await supabase
-      .from("oracle_invoices")
-      .upsert(supabasePayload, { onConflict: "invoice_number" });
-
-    if (!error) {
+  if (mysqlReady) {
+    try {
+      const mysqlNow = toMysqlDateTime(now);
+      for (const item of formatted) {
+        await executeSql(
+          `INSERT INTO oracle_invoices (
+             id, invoice_number, doc_type, customer_code, customer_name, phone,
+             invoice_date, amount, currency, remaining_balance, payment_method,
+             attachment_url, onyx_form_code, details, status, whatsapp_message_id,
+             sent_at, created_at, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             doc_type = VALUES(doc_type),
+             customer_code = VALUES(customer_code),
+             customer_name = VALUES(customer_name),
+             phone = VALUES(phone),
+             invoice_date = VALUES(invoice_date),
+             amount = VALUES(amount),
+             currency = VALUES(currency),
+             remaining_balance = VALUES(remaining_balance),
+             payment_method = VALUES(payment_method),
+             attachment_url = COALESCE(VALUES(attachment_url), attachment_url),
+             onyx_form_code = VALUES(onyx_form_code),
+             details = VALUES(details),
+             status = IF(status = 'sent', 'sent', VALUES(status)),
+             whatsapp_message_id = IF(status = 'sent', whatsapp_message_id, VALUES(whatsapp_message_id)),
+             sent_at = IF(status = 'sent', sent_at, VALUES(sent_at)),
+             updated_at = VALUES(updated_at)`,
+          [
+            item.id,
+            item.invoice_number,
+            item.doc_type,
+            item.customer_code ?? null,
+            item.customer_name,
+            item.phone,
+            item.invoice_date,
+            Number(item.amount ?? 0),
+            item.currency,
+            item.remaining_balance === null || item.remaining_balance === undefined
+              ? null
+              : Number(item.remaining_balance),
+            item.payment_method ?? null,
+            item.attachment_url ?? null,
+            item.onyx_form_code ?? null,
+            item.details ?? "",
+            item.status,
+            item.whatsapp_message_id ?? null,
+            item.sent_at ?? null,
+            toMysqlDateTime(item.created_at),
+            mysqlNow,
+          ]
+        );
+      }
       for (const item of formatted) {
         const existingIdx = memoryInvoicesCache.findIndex(
           (x) => x.invoice_number === item.invoice_number
@@ -334,11 +394,9 @@ export async function upsertOracleInvoices(
         }
       }
       return { success: true, count: formatted.length, newlyInserted };
-    } else {
-      console.warn("[OracleInvoices] Supabase upsert error:", error.message);
+    } catch (err: any) {
+      console.warn("[OracleInvoices] MySQL upsert error, falling back to memory:", err?.message);
     }
-  } catch (err: any) {
-    console.warn("[OracleInvoices] Supabase upsert error, falling back to memory:", err?.message);
   }
 
   // Update memory cache
@@ -370,20 +428,23 @@ export async function updateInvoiceWhatsAppStatus({
 }): Promise<boolean> {
   const now = new Date().toISOString();
 
-  // Try updating in Supabase
-  try {
-    const supabase = await createSupabaseServerClient();
-    const { error } = await supabase
-      .from("oracle_invoices")
-      .update({
-        status,
-        whatsapp_message_id: messageId || null,
-        sent_at: status === "sent" ? now : null,
-        updated_at: now,
-      })
-      .eq("invoice_number", invoiceNumber);
-
-    if (!error) {
+  if (isMysqlConfigured()) {
+    try {
+      await executeSql(
+        `UPDATE oracle_invoices
+         SET status = ?,
+             whatsapp_message_id = ?,
+             sent_at = ?,
+             updated_at = ?
+         WHERE invoice_number = ?`,
+        [
+          status,
+          messageId || null,
+          status === "sent" ? now : null,
+          toMysqlDateTime(now),
+          invoiceNumber,
+        ]
+      );
       const item = memoryInvoicesCache.find((x) => x.invoice_number === invoiceNumber);
       if (item) {
         item.status = status;
@@ -391,9 +452,9 @@ export async function updateInvoiceWhatsAppStatus({
         item.sent_at = status === "sent" ? now : null;
       }
       return true;
+    } catch (err) {
+      console.warn("[OracleInvoices] MySQL update status error, updating memory cache only:", err);
     }
-  } catch (err) {
-    console.warn("[OracleInvoices] Supabase update status error, updating memory cache only.");
   }
 
   // Update memory cache

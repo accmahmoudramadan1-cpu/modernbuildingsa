@@ -1,11 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { createClient } from "@/lib/supabase-client";
 
 export default function LoginPage() {
-  const supabase = createClient();
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -16,18 +13,25 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      const res = await fetch("/api/admin/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
 
-    if (error) {
-      setError("الإيميل أو كلمة المرور غير صحيحة");
+      if (!res.ok || !data.success) {
+        setError(data.error || "الإيميل أو كلمة المرور غير صحيحة");
+        setLoading(false);
+        return;
+      }
+
+      window.location.href = "/admin";
+    } catch {
+      setError("تعذر الاتصال بالسيرفر أثناء تسجيل الدخول.");
       setLoading(false);
-      return;
     }
-
-    window.location.href = "/admin";
   }
 
   return (
