@@ -817,6 +817,8 @@ def _auto_detect_default_pdf_dirs() -> str:
         return PDF_EXPORT_DIR
     candidates = []
     for path_guess in (
+        r"D:\MSG\IAS1\PDF", r"D:\MSG\IAS\PDF", r"C:\MSG\IAS1\PDF",
+        r"D:\DOPDF", r"C:\DOPDF",
         r"C:\OnyxPDF", r"D:\OnyxPDF", r"C:\PDF", r"D:\PDF",
         r"C:\OnyxPro\PDF", r"D:\OnyxPro\PDF", r"C:\YemenSoft\PDF", r"D:\YemenSoft\PDF",
         r"\\onyxserver\OnyxPDF", r"\\onyxserver\PDF",
@@ -827,28 +829,32 @@ def _auto_detect_default_pdf_dirs() -> str:
 
 
 def _build_pdf_index(export_dirs_str: str) -> list:
-    """فهرسة ملفات PDF من مجلدات تصدير أونكس (بعمق أقصى 3 مجلدات، مرتبة من الأحدث للأقدم)"""
+    """فهرسة سريعة لملفات PDF باستخدام os.scandir() (بعمق أقصى 3 مجلدات، مرتبة من الأحدث للأقدم)"""
     entries = []
     if not export_dirs_str:
         return entries
 
+    def _scan(dir_path: str, depth: int):
+        try:
+            with os.scandir(dir_path) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        if depth < 3:
+                            _scan(entry.path, depth + 1)
+                    elif entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(".pdf"):
+                        try:
+                            mtime = entry.stat().st_mtime
+                        except OSError:
+                            mtime = 0
+                        stem = os.path.splitext(entry.name)[0].lower()
+                        entries.append((stem, entry.path, mtime))
+        except OSError:
+            pass
+
     for raw_dir in export_dirs_str.split(";"):
         base_dir = raw_dir.strip().strip('"')
-        if not base_dir or not os.path.isdir(base_dir):
-            continue
-        base_depth = base_dir.rstrip("\\/").count(os.sep)
-        for root, dirs, files in os.walk(base_dir):
-            if root.rstrip("\\/").count(os.sep) - base_depth >= 3:
-                dirs[:] = []
-            for fname in files:
-                if fname.lower().endswith(".pdf"):
-                    full_path = os.path.join(root, fname)
-                    try:
-                        mtime = os.path.getmtime(full_path)
-                    except OSError:
-                        mtime = 0
-                    stem = os.path.splitext(fname)[0].lower()
-                    entries.append((stem, full_path, mtime))
+        if base_dir and os.path.isdir(base_dir):
+            _scan(base_dir, 0)
 
     entries.sort(key=lambda item: item[2], reverse=True)
     return entries
