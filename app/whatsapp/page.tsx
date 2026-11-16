@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import WhatsAppLoginForm from "@/components/WhatsAppLoginForm";
 import WhatsAppInstallBanner from "@/components/WhatsAppInstallBanner";
+import { isStandalonePwa } from "@/lib/pwa-utils";
 import {
   WhatsAppIcon,
   RefreshIcon,
@@ -52,6 +54,9 @@ interface OracleInvoice {
 }
 
 export default function WhatsAppInvoicesPage() {
+  const router = useRouter();
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [redirectingToInbox, setRedirectingToInbox] = useState(false);
   const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
   const [authUser, setAuthUser] = useState<string>("");
   const [showInstallPopup, setShowInstallPopup] = useState(false);
@@ -116,6 +121,15 @@ export default function WhatsAppInvoicesPage() {
   }
 
   useEffect(() => {
+    const standalone = isStandalonePwa();
+    setIsStandalone(standalone);
+    const params = new URLSearchParams(window.location.search);
+    if (standalone && params.get("view") !== "invoices") {
+      setRedirectingToInbox(true);
+      router.replace("/whatsapp/inbox");
+      return;
+    }
+
     let active = true;
     (async () => {
       try {
@@ -139,7 +153,7 @@ export default function WhatsAppInvoicesPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [router]);
 
   // Open Template Send Modal for a record
   function openSendModal(inv: OracleInvoice) {
@@ -270,12 +284,14 @@ export default function WhatsAppInvoicesPage() {
   const activeTemplateDef = getOnyxTemplate(activeDocType);
   const livePreviewText = formatTemplatePreviewText(activeDocType, parameters);
 
-  if (authStatus === "checking") {
+  if (redirectingToInbox || authStatus === "checking") {
     return (
       <main dir="rtl" className="flex min-h-screen items-center justify-center bg-[#f4f7f6] px-4">
         <div className="flex flex-col items-center gap-3 rounded-3xl bg-white p-8 shadow-lg border border-black/5">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent" />
-          <p className="text-sm font-bold text-gray-600">جاري التحقق من جلسة الدخول...</p>
+          <p className="text-sm font-bold text-gray-600">
+            {redirectingToInbox ? "جاري فتح صندوق الوارد..." : "جاري التحقق من جلسة الدخول..."}
+          </p>
         </div>
       </main>
     );
@@ -295,10 +311,12 @@ export default function WhatsAppInvoicesPage() {
 
   return (
     <main dir="rtl" className="min-h-screen bg-[#f5f5f3] px-4 py-8 sm:px-6 lg:px-10">
-      <WhatsAppInstallBanner
-        forceOpen={showInstallPopup}
-        onClose={() => setShowInstallPopup(false)}
-      />
+      {!isStandalone && (
+        <WhatsAppInstallBanner
+          forceOpen={showInstallPopup}
+          onClose={() => setShowInstallPopup(false)}
+        />
+      )}
       <div className="mx-auto max-w-7xl">
         {/* Navigation & Header */}
         <div className="flex flex-col gap-4 border-b border-black/10 pb-6 md:flex-row md:items-center md:justify-between">
@@ -332,16 +350,18 @@ export default function WhatsAppInvoicesPage() {
               <span>صندوق الوارد والمحادثات</span>
             </Link>
 
-            <button
-              type="button"
-              onClick={() => setShowInstallPopup(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-bold text-emerald-800 shadow-xs transition hover:bg-emerald-50"
-            >
-              <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-              </svg>
-              <span>تثبيت التطبيق</span>
-            </button>
+            {!isStandalone && (
+              <button
+                type="button"
+                onClick={() => setShowInstallPopup(true)}
+                className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-bold text-emerald-800 shadow-xs transition hover:bg-emerald-50"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+                </svg>
+                <span>تثبيت التطبيق</span>
+              </button>
+            )}
 
             <button
               onClick={loadInvoices}

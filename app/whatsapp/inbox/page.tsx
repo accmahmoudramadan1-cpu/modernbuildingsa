@@ -5,6 +5,7 @@ import Link from "next/link";
 import WhatsAppLoginForm from "@/components/WhatsAppLoginForm";
 import WhatsAppInstallBanner from "@/components/WhatsAppInstallBanner";
 import WhatsAppInboxTemplateModal from "@/components/WhatsAppInboxTemplateModal";
+import { isStandalonePwa } from "@/lib/pwa-utils";
 import {
   DefaultAvatar,
   MessageBubble,
@@ -42,6 +43,7 @@ function formatTimer(seconds: number): string {
 }
 
 export default function WhatsAppInboxPage() {
+  const [isStandalone, setIsStandalone] = useState(false);
   const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "unauthenticated">(
     "checking"
   );
@@ -183,6 +185,7 @@ export default function WhatsAppInboxPage() {
 
   // Auth check on mount + optional ?phone= query param
   useEffect(() => {
+    setIsStandalone(isStandalonePwa());
     let active = true;
     const params = new URLSearchParams(window.location.search);
     const initialPhone = params.get("phone");
@@ -585,11 +588,13 @@ export default function WhatsAppInboxPage() {
       }}
       className="h-[100dvh] w-full overflow-hidden bg-[#f6f9fb] md:p-3 lg:p-4"
     >
-      <WhatsAppInstallBanner
-        autoOpen={false}
-        forceOpen={showInstallModal}
-        onClose={() => setShowInstallModal(false)}
-      />
+      {!isStandalone && (
+        <WhatsAppInstallBanner
+          autoOpen={false}
+          forceOpen={showInstallModal}
+          onClose={() => setShowInstallModal(false)}
+        />
+      )}
 
       <div className="mx-auto flex h-full max-w-[1440px] flex-col md:flex-row-reverse overflow-hidden bg-white md:rounded-2xl md:border md:border-slate-200/90 md:shadow-sm">
         {/* LEFT PANE ON DESKTOP (Conversations List) / FULL SCREEN ON MOBILE WHEN NO CHAT SELECTED */}
@@ -626,19 +631,21 @@ export default function WhatsAppInboxPage() {
                 </svg>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setShowInstallModal(true)}
-                title="تثبيت التطبيق"
-                className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 transition hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700"
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
-                </svg>
-              </button>
+              {!isStandalone && (
+                <button
+                  type="button"
+                  onClick={() => setShowInstallModal(true)}
+                  title="تثبيت التطبيق"
+                  className="flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700 transition hover:border-emerald-500 hover:bg-emerald-50 hover:text-emerald-700"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+                  </svg>
+                </button>
+              )}
 
               <Link
-                href="/whatsapp"
+                href="/whatsapp?view=invoices"
                 title="العودة لبوابة فواتير أونكس"
                 className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[11px] font-black text-slate-700 transition hover:bg-slate-100"
               >
@@ -819,7 +826,7 @@ export default function WhatsAppInboxPage() {
                   + بدء محادثة برقم هاتف
                 </button>
                 <Link
-                  href="/whatsapp"
+                  href="/whatsapp?view=invoices"
                   className="rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-black text-slate-700 hover:bg-slate-50"
                 >
                   بوابة فواتير أونكس

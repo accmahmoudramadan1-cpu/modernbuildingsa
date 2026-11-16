@@ -1,6 +1,12 @@
 import crypto from "crypto";
 import { executeSql, isMysqlConfigured, queryRows } from "@/lib/mysql";
 import { formatPhoneNumber, phoneSearchVariants } from "@/lib/whatsapp-phone";
+import {
+  extractTemplateParameters,
+  formatTemplatePreviewText,
+  getOnyxTemplate,
+  type OnyxDocType,
+} from "@/lib/onyx-templates";
 
 export type WhatsAppMessageStatus = "sent" | "delivered" | "read" | "failed";
 export type WhatsAppMessageDirection = "in" | "out";
@@ -248,12 +254,19 @@ export async function recordWhatsAppMessage(
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(3), NOW(3))
        ON DUPLICATE KEY UPDATE
          customer_name = COALESCE(NULLIF(VALUES(customer_name), ''), customer_name),
-         last_message_text = VALUES(last_message_text),
-         last_message_type = VALUES(last_message_type),
-         last_message_direction = VALUES(last_message_direction),
-         last_message_status = VALUES(last_message_status),
+         last_message_text = IF(VALUES(last_message_at) >= last_message_at, VALUES(last_message_text), last_message_text),
+         last_message_type = IF(VALUES(last_message_at) >= last_message_at, VALUES(last_message_type), last_message_type),
+         last_message_direction = IF(VALUES(last_message_at) >= last_message_at, VALUES(last_message_direction), last_message_direction),
+         last_message_status = IF(VALUES(last_message_at) >= last_message_at, VALUES(last_message_status), last_message_status),
          last_message_at = GREATEST(last_message_at, VALUES(last_message_at)),
-         last_inbound_at = COALESCE(VALUES(last_inbound_at), last_inbound_at),
+         last_inbound_at = COALESCE(
+           IF(
+             last_inbound_at IS NULL OR (VALUES(last_inbound_at) IS NOT NULL AND VALUES(last_inbound_at) > last_inbound_at),
+             VALUES(last_inbound_at),
+             last_inbound_at
+           ),
+           last_inbound_at
+         ),
          unread_count = unread_count + VALUES(unread_count),
          updated_at = NOW(3)`,
       [
@@ -358,10 +371,75 @@ export async function updateWhatsAppMessageStatus(params: {
   }
 }
 
+declare global {
+  var __waOracleBackfillPromise: Promise<void> | undefined;
+}
+
+async function runHistoricalOracleBackfill(): Promise<void> {
+  try {
+    const countRows = await queryRows<any>(
+      `SELECT COUNT(*) AS c FROM whatsapp_conversations`
+    );
+    const convCount = Number(countRows[0]?.c || 0);
+    if (convCount > 3) return;
+
+    const missing = await queryRows<any>(
+      `SELECT o.invoice_number, o.doc_type, o.customer_name, o.phone,
+              o.invoice_date, o.amount, o.currency, o.remaining_balance,
+              o.payment_method, o.attachment_url, o.details, o.status,
+              o.whatsapp_message_id, o.sent_at, o.created_at
+       FROM oracle_invoices o
+       WHERE o.status IN ('sent', 'failed')
+         AND o.whatsapp_message_id IS NOT NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM whatsapp_messages m WHERE m.wa_message_id = o.whatsapp_message_id
+         )
+       ORDER BY COALESCE(o.sent_at, o.created_at) ASC
+       LIMIT 300`
+    );
+
+    for (const row of missing) {
+      const docType = (row.doc_type || "cash_invoice") as OnyxDocType;
+      const tpl = getOnyxTemplate(docType);
+      const params = extractTemplateParameters(docType, row);
+      const bodyText = formatTemplatePreviewText(docType, params);
+      const attachUrl = row.attachment_url ? String(row.attachment_url).trim() : null;
+
+      await recordWhatsAppMessage({
+        phone: String(row.phone),
+        customerName: row.customer_name ? String(row.customer_name) : null,
+        waMessageId: String(row.whatsapp_message_id),
+        direction: "out",
+        msgType: attachUrl ? "document" : "template",
+        body: bodyText,
+        mediaUrl: attachUrl,
+        mediaMime: attachUrl ? "application/pdf" : null,
+        mediaFilename: attachUrl ? `${row.invoice_number}.pdf` : null,
+        templateName: tpl.defaultMetaTemplateName,
+        status: row.status === "failed" ? "failed" : "sent",
+        createdAt: row.sent_at || row.created_at || new Date(),
+      });
+    }
+  } catch (err) {
+    globalThis.__waOracleBackfillPromise = undefined;
+    console.warn("[WhatsApp Inbox] Historical Oracle backfill skipped:", err);
+  }
+}
+
+async function ensureHistoricalOracleBackfill(): Promise<void> {
+  if (!isMysqlConfigured()) return;
+  if (!globalThis.__waOracleBackfillPromise) {
+    globalThis.__waOracleBackfillPromise = runHistoricalOracleBackfill();
+  }
+  await globalThis.__waOracleBackfillPromise;
+}
+
 export async function getInboxConversations(
   search?: string
 ): Promise<WhatsAppConversationRecord[]> {
   if (!isMysqlConfigured()) return [];
+
+  await ensureHistoricalOracleBackfill();
 
   try {
     const trimmed = String(search || "").trim();

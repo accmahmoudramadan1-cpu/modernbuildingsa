@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { isStandalonePwa } from "@/lib/pwa-utils";
 
 interface WhatsAppInstallBannerProps {
   forceOpen?: boolean;
@@ -22,9 +23,7 @@ export default function WhatsAppInstallBanner({
   const [installSuccess, setInstallSuccess] = useState(false);
 
   useEffect(() => {
-    const standalone =
-      window.matchMedia?.("(display-mode: standalone)")?.matches ||
-      (window.navigator as any)?.standalone === true;
+    const standalone = isStandalonePwa();
     setIsStandalone(standalone);
 
     const ua = window.navigator.userAgent || "";
