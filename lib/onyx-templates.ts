@@ -200,14 +200,16 @@ export function extractTemplateParameters(
   const custName = String(record.customer_name || "عميلنا العزيز").trim();
   const amountWithCurr = formatAmountWithCurrency(record.amount, currency, true);
   const amountRaw = formatAmountWithCurrency(record.amount, currency, false);
-  const balanceVal =
-    record.remaining_balance !== undefined && record.remaining_balance !== null && String(record.remaining_balance).trim() !== ""
-      ? formatAmountWithCurrency(record.remaining_balance, currency, true)
-      : amountWithCurr;
-  const balanceRaw =
-    record.remaining_balance !== undefined && record.remaining_balance !== null && String(record.remaining_balance).trim() !== ""
-      ? formatAmountWithCurrency(record.remaining_balance, currency, false)
-      : amountRaw;
+  const hasBalance =
+    record.remaining_balance !== undefined &&
+    record.remaining_balance !== null &&
+    String(record.remaining_balance).trim() !== "";
+  const balanceVal = hasBalance
+    ? formatAmountWithCurrency(record.remaining_balance, currency, true)
+    : "حسب كشف الحساب";
+  const balanceRaw = hasBalance
+    ? formatAmountWithCurrency(record.remaining_balance, currency, false)
+    : "حسب كشف الحساب";
 
   switch (docType) {
     case "cash_invoice":

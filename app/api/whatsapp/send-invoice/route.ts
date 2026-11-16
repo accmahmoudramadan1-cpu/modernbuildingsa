@@ -111,14 +111,27 @@ export async function POST(request: NextRequest) {
         ? customParameters.map((p: any) => String(p ?? "").trim())
         : extractTemplateParameters(resolvedDocType, {
             invoice_number: String(invoiceNumber),
-            customer_name: customerName || "عميلنا العزيز",
+            customer_name:
+              effectiveCustomerName || "عميلنا العزيز",
             phone: String(phone),
-            invoice_date: invoiceDate || new Date().toISOString().split("T")[0],
-            amount: amount ?? "0",
-            currency,
-            remaining_balance: remainingBalance,
-            payment_method: paymentMethod,
-            details,
+            invoice_date:
+              invoiceDate ||
+              authoritativeInvoice?.invoice_date ||
+              new Date().toISOString().split("T")[0],
+            amount:
+              amount !== undefined && amount !== null && String(amount).trim() !== ""
+                ? amount
+                : (authoritativeInvoice?.amount ?? "0"),
+            currency: authoritativeInvoice?.currency || currency,
+            remaining_balance:
+              remainingBalance !== undefined &&
+              remainingBalance !== null &&
+              String(remainingBalance).trim() !== ""
+                ? remainingBalance
+                : authoritativeInvoice?.remaining_balance,
+            payment_method:
+              paymentMethod || authoritativeInvoice?.payment_method,
+            details: details || authoritativeInvoice?.details,
             doc_type: resolvedDocType,
           });
 
