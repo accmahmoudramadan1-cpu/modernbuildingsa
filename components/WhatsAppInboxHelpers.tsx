@@ -297,7 +297,9 @@ export function MessageBubble({
           </div>
         )}
 
-        {msg.msg_type === "document" && (
+        {(msg.msg_type === "document" ||
+          (Boolean(msg.media_url) &&
+            !["image", "sticker", "video", "audio"].includes(msg.msg_type))) && (
           <div className="mb-2 flex items-center gap-3 rounded-xl bg-white/80 p-3 border border-black/10">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 border border-red-200/70 font-black text-[11px]">
               PDF
