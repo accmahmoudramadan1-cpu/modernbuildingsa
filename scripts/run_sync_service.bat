@@ -23,10 +23,10 @@ if errorlevel 1 (
     if exist "C:\Python311\python.exe" set "PY_EXE=C:\Python311\python.exe"
 )
 
-echo [%date% %time%] Starting Onyx Pro WhatsApp Sync Service (interval: 30s)... >> "%~dp0sync_service.log"
+echo [%date% %time%] Starting Onyx Pro WhatsApp Sync Service (interval: 15s)... >> "%~dp0sync_service.log"
 
 :LOOP
-"%PY_EXE%" -u "%~dp0sync_orant_invoices.py" --loop 30 >> "%~dp0sync_service.log" 2>&1
+"%PY_EXE%" -u "%~dp0sync_orant_invoices.py" --loop 15 >> "%~dp0sync_service.log" 2>&1
 
 echo [%date% %time%] Sync script stopped, retrying in 10 seconds... >> "%~dp0sync_service.log"
 timeout /t 10 /nobreak > nul

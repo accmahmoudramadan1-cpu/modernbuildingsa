@@ -839,6 +839,12 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
         if response.status_code == 200:
             result = response.json()
             print(f"[نجاح] استجابة الخادم: {result.get('message', 'تمت المزامنة بنجاح')}")
+            auto_sent = int(result.get("autoSentCount", 0) or 0)
+            auto_failed = int(result.get("autoFailedCount", 0) or 0)
+            if auto_sent > 0:
+                print(f"  [واتساب] تم الإرسال التلقائي عبر واتساب لـ {auto_sent} عملية.")
+            if auto_failed > 0:
+                print(f"  [واتساب - تنبيه] تعذر الإرسال التلقائي لـ {auto_failed} عملية (يمكن إعادة المحاولة من البوابة).")
             for doc in docs_list:
                 mark_invoice_as_synced(
                     doc["invoice_number"],

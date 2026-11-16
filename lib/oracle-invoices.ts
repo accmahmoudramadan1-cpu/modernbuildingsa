@@ -214,13 +214,13 @@ function sanitizeNumeric(val: unknown, fallback: number | null): number | null {
  */
 export async function upsertOracleInvoices(
   incomingInvoices: Partial<OracleInvoice>[]
-): Promise<{ success: boolean; count: number; error?: string }> {
+): Promise<{ success: boolean; count: number; newlyInserted: OracleInvoice[]; error?: string }> {
   if (!Array.isArray(incomingInvoices) || incomingInvoices.length === 0) {
-    return { success: true, count: 0 };
+    return { success: true, count: 0, newlyInserted: [] };
   }
 
   const now = new Date().toISOString();
-  const formatted: OracleInvoice[] = incomingInvoices.map((item, idx) => ({
+  const formattedRaw: OracleInvoice[] = incomingInvoices.map((item, idx) => ({
     id: item.id || crypto.randomUUID(),
     invoice_number: String(item.invoice_number || "").trim() || `DOC-${Date.now()}-${idx}`,
     doc_type: (item.doc_type || "cash_invoice") as OnyxDocType,
@@ -242,12 +242,78 @@ export async function upsertOracleInvoices(
     updated_at: now,
   }));
 
+  // Deduplicate incoming batch by invoice_number and track any explicit force_auto_send flag
+  const forceAutoSendNumbers = new Set<string>();
+  const dedupedMap = new Map<string, OracleInvoice>();
+  incomingInvoices.forEach((raw, idx) => {
+    const f = formattedRaw[idx];
+    if ((raw as any)?.force_auto_send === true) {
+      forceAutoSendNumbers.add(f.invoice_number);
+    }
+    dedupedMap.set(f.invoice_number, f);
+  });
+  const formatted = Array.from(dedupedMap.values());
+  const incomingNumbers = formatted.map((f) => f.invoice_number);
+
+  // Check existing records in memory cache and Supabase so already-sent invoices stay "sent"
+  const existingMap = new Map<
+    string,
+    { status: OracleInvoice["status"]; whatsapp_message_id?: string | null; sent_at?: string | null }
+  >();
+  for (const cached of memoryInvoicesCache) {
+    if (incomingNumbers.includes(cached.invoice_number)) {
+      existingMap.set(cached.invoice_number, {
+        status: cached.status,
+        whatsapp_message_id: cached.whatsapp_message_id ?? null,
+        sent_at: cached.sent_at ?? null,
+      });
+    }
+  }
+
+  let supabaseClient: Awaited<ReturnType<typeof createSupabaseServerClient>> | null = null;
+  try {
+    supabaseClient = await createSupabaseServerClient();
+    for (let i = 0; i < incomingNumbers.length; i += 200) {
+      const chunk = incomingNumbers.slice(i, i + 200);
+      const { data: existingRows, error: selectErr } = await supabaseClient
+        .from("oracle_invoices")
+        .select("invoice_number, status, whatsapp_message_id, sent_at")
+        .in("invoice_number", chunk);
+
+      if (!selectErr && Array.isArray(existingRows)) {
+        for (const row of existingRows as any[]) {
+          existingMap.set(String(row.invoice_number), {
+            status: (row.status || "pending") as OracleInvoice["status"],
+            whatsapp_message_id: row.whatsapp_message_id ?? null,
+            sent_at: row.sent_at ?? null,
+          });
+        }
+      }
+    }
+  } catch (err: any) {
+    console.warn("[OracleInvoices] Pre-upsert lookup skipped:", err?.message);
+  }
+
+  const newlyInserted: OracleInvoice[] = [];
+  for (const item of formatted) {
+    const existing = existingMap.get(item.invoice_number);
+    const forceAutoSend = forceAutoSendNumbers.has(item.invoice_number);
+
+    if (existing?.status === "sent") {
+      item.status = "sent";
+      item.whatsapp_message_id = existing.whatsapp_message_id ?? null;
+      item.sent_at = existing.sent_at ?? null;
+    } else if (!existing || forceAutoSend) {
+      newlyInserted.push(item);
+    }
+  }
+
   // Omit id so PostgreSQL uses DEFAULT gen_random_uuid() on insert and preserves existing id on conflict
   const supabasePayload = formatted.map(({ id: _omitId, ...rest }) => rest);
 
   // Try saving to Supabase first
   try {
-    const supabase = await createSupabaseServerClient();
+    const supabase = supabaseClient ?? (await createSupabaseServerClient());
     const { error } = await supabase
       .from("oracle_invoices")
       .upsert(supabasePayload, { onConflict: "invoice_number" });
@@ -263,7 +329,7 @@ export async function upsertOracleInvoices(
           memoryInvoicesCache.unshift(item);
         }
       }
-      return { success: true, count: formatted.length };
+      return { success: true, count: formatted.length, newlyInserted };
     } else {
       console.warn("[OracleInvoices] Supabase upsert error:", error.message);
     }
@@ -283,7 +349,7 @@ export async function upsertOracleInvoices(
     }
   }
 
-  return { success: true, count: formatted.length };
+  return { success: true, count: formatted.length, newlyInserted };
 }
 
 /**

@@ -163,6 +163,17 @@ export interface SendTemplateOptions {
   languageCode?: string;
   bodyParameters?: string[];
   headerUrl?: string; // Optional PDF or Image for invoices
+  fallbackPdfUrl?: string; // Auto-attached if Meta template expects a Document Header
+  documentFilename?: string;
+}
+
+function isTemplateHeaderMismatchError(data: any): boolean {
+  const code = Number(data?.error?.code);
+  if (code === 132000 || code === 132012 || code === 131008) {
+    return true;
+  }
+  const combined = `${data?.error?.message || ""} ${data?.error?.error_data?.details || ""}`;
+  return /header|component|document|parameter/i.test(combined);
 }
 
 /**
@@ -174,6 +185,8 @@ export async function sendWhatsAppTemplate({
   languageCode = "ar",
   bodyParameters = [],
   headerUrl,
+  fallbackPdfUrl,
+  documentFilename,
 }: SendTemplateOptions) {
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
   const accessToken = process.env.WHATSAPP_ACCESS_TOKEN;
@@ -196,50 +209,49 @@ export async function sendWhatsAppTemplate({
     };
   }
 
-  const components: WhatsAppTemplateComponent[] = [];
-
-  // 1. Header (e.g. Document PDF for invoice if provided)
-  if (headerUrl) {
-    components.push({
-      type: "header",
-      parameters: [
-        {
-          type: "document",
-          document: {
-            link: headerUrl,
-            filename: `Invoice_${recipient}.pdf`,
+  const buildComponents = (docHeaderUrl?: string): WhatsAppTemplateComponent[] => {
+    const components: WhatsAppTemplateComponent[] = [];
+    if (docHeaderUrl) {
+      components.push({
+        type: "header",
+        parameters: [
+          {
+            type: "document",
+            document: {
+              link: docHeaderUrl,
+              filename: documentFilename || `${templateName}_${recipient}.pdf`,
+            },
           },
-        },
-      ],
-    });
-  }
-
-  // 2. Body Parameters ({{1}}, {{2}}, {{3}}, etc.)
-  if (bodyParameters && bodyParameters.length > 0) {
-    components.push({
-      type: "body",
-      parameters: bodyParameters.map((val) => ({
-        type: "text",
-        text: String(val ?? "").trim(),
-      })),
-    });
-  }
-
-  const payload: WhatsAppTemplateMessagePayload = {
-    messaging_product: "whatsapp",
-    recipient_type: "individual",
-    to: recipient,
-    type: "template",
-    template: {
-      name: templateName,
-      language: {
-        code: languageCode,
-      },
-      ...(components.length > 0 ? { components } : {}),
-    },
+        ],
+      });
+    }
+    if (bodyParameters && bodyParameters.length > 0) {
+      components.push({
+        type: "body",
+        parameters: bodyParameters.map((val) => ({
+          type: "text",
+          text: String(val ?? "").trim(),
+        })),
+      });
+    }
+    return components;
   };
 
-  try {
+  const postTemplate = async (components: WhatsAppTemplateComponent[]) => {
+    const payload: WhatsAppTemplateMessagePayload = {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: recipient,
+      type: "template",
+      template: {
+        name: templateName,
+        language: {
+          code: languageCode,
+        },
+        ...(components.length > 0 ? { components } : {}),
+      },
+    };
+
     const response = await fetch(
       `https://graph.facebook.com/v21.0/${phoneNumberId}/messages`,
       {
@@ -253,16 +265,44 @@ export async function sendWhatsAppTemplate({
     );
 
     const data = await response.json();
+    return { ok: response.ok, data };
+  };
 
-    if (!response.ok) {
-      console.error("[WhatsApp Template] API Error:", data);
-      return { success: false, error: formatMetaApiError(data), details: data };
+  try {
+    const cleanHeaderUrl = headerUrl ? String(headerUrl).trim() : "";
+    const cleanFallbackUrl = fallbackPdfUrl ? String(fallbackPdfUrl).trim() : "";
+
+    let attempt = await postTemplate(buildComponents(cleanHeaderUrl || undefined));
+
+    // Case A: headerUrl provided, but Meta template is still BODY-only -> retry without header
+    if (!attempt.ok && cleanHeaderUrl && isTemplateHeaderMismatchError(attempt.data)) {
+      console.warn(
+        `[WhatsApp Template] "${templateName}" rejected headerUrl (still BODY-only in Meta). Retrying without header...`
+      );
+      attempt = await postTemplate(buildComponents(undefined));
+    }
+    // Case B: no headerUrl provided, but Meta template was upgraded to require a Document Header -> retry with PDF
+    else if (
+      !attempt.ok &&
+      !cleanHeaderUrl &&
+      cleanFallbackUrl &&
+      isTemplateHeaderMismatchError(attempt.data)
+    ) {
+      console.warn(
+        `[WhatsApp Template] "${templateName}" requires a Document Header. Retrying with generated PDF (${cleanFallbackUrl})...`
+      );
+      attempt = await postTemplate(buildComponents(cleanFallbackUrl));
+    }
+
+    if (!attempt.ok) {
+      console.error("[WhatsApp Template] API Error:", attempt.data);
+      return { success: false, error: formatMetaApiError(attempt.data), details: attempt.data };
     }
 
     return {
       success: true,
-      messageId: data?.messages?.[0]?.id,
-      data,
+      messageId: attempt.data?.messages?.[0]?.id,
+      data: attempt.data,
     };
   } catch (error: any) {
     console.error("[WhatsApp Template] Request exception:", error);

@@ -245,6 +245,11 @@ export default function WhatsAppInvoicesPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-xl border border-green-200 bg-green-50 px-3.5 py-2 text-xs font-bold text-green-800">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" />
+              <span>الإرسال التلقائي من أونكس: مفعّل</span>
+            </span>
+
             <button
               onClick={loadInvoices}
               disabled={loading}

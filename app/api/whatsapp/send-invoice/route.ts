@@ -81,12 +81,20 @@ export async function POST(request: NextRequest) {
       }
       result = await sendWhatsAppMessage(phone, fullText);
     } else {
+      const publicBaseUrl =
+        process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com";
+      const fallbackPdfUrl = `${publicBaseUrl}/api/whatsapp/invoice-pdf?invoiceNumber=${encodeURIComponent(
+        String(invoiceNumber)
+      )}`;
+
       result = await sendWhatsAppTemplate({
         to: phone,
         templateName: resolvedTemplateName,
         languageCode,
         bodyParameters,
         headerUrl: headerUrl ? String(headerUrl).trim() : undefined,
+        fallbackPdfUrl,
+        documentFilename: `ModernBuilding_${String(invoiceNumber).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`,
       });
     }
 
