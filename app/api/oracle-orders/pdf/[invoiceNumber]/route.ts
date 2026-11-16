@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { isMysqlConfigured, queryRows } from "@/lib/mysql";
+import { repairOnyxPdfFonts } from "@/lib/fix-onyx-pdf";
 
 export const dynamic = "force-dynamic";
 
@@ -29,9 +30,10 @@ export async function GET(
     }
 
     const row = rows[0];
-    const buf = Buffer.isBuffer(row.pdf_data)
+    const rawBuf = Buffer.isBuffer(row.pdf_data)
       ? row.pdf_data
       : Buffer.from(row.pdf_data);
+    const buf = repairOnyxPdfFonts(rawBuf);
 
     const safeFilename = String(row.filename || `${decodedInvoice}.pdf`).replace(/[^A-Za-z0-9_.-]/g, "_");
 

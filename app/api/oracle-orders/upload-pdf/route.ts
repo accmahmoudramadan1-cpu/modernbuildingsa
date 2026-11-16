@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { executeSql, isMysqlConfigured } from "@/lib/mysql";
+import { repairOnyxPdfFonts } from "@/lib/fix-onyx-pdf";
 
 export const dynamic = "force-dynamic";
 
@@ -39,19 +40,19 @@ export async function POST(request: NextRequest) {
     }
 
     const cleanBase64 = contentBase64.replace(/^data:application\/pdf;base64,/i, "");
-    const pdfBuffer = Buffer.from(cleanBase64, "base64");
+    const rawPdfBuffer = Buffer.from(cleanBase64, "base64");
 
-    if (pdfBuffer.length === 0 || pdfBuffer.length > MAX_PDF_BYTES) {
+    if (rawPdfBuffer.length === 0 || rawPdfBuffer.length > MAX_PDF_BYTES) {
       return NextResponse.json(
         {
           success: false,
-          error: `PDF size invalid (${pdfBuffer.length} bytes). Max allowed is 10 MB.`,
+          error: `PDF size invalid (${rawPdfBuffer.length} bytes). Max allowed is 10 MB.`,
         },
         { status: 400 }
       );
     }
 
-    if (!pdfBuffer.subarray(0, 8).toString("ascii").includes("%PDF-")) {
+    if (!rawPdfBuffer.subarray(0, 8).toString("ascii").includes("%PDF-")) {
       return NextResponse.json(
         { success: false, error: "Uploaded content is not a valid PDF binary (%PDF- header missing)." },
         { status: 400 }
@@ -65,6 +66,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const pdfBuffer = repairOnyxPdfFonts(rawPdfBuffer);
     const safeName = filename.replace(/[^A-Za-z0-9_.-]/g, "_") || `${invoiceNumber}.pdf`;
 
     await executeSql(
