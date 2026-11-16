@@ -29,59 +29,144 @@ export default function WhatsAppInboxTemplateModal({
   onSent,
   onUnauthorized,
 }: WhatsAppInboxTemplateModalProps) {
-  const [docType, setDocType] = useState<OnyxDocType>("cash_invoice");
-  const [templateName, setTemplateName] = useState("cash_invoice");
+  const [docType, setDocType] = useState<OnyxDocType>("direct_alert");
+  const [templateName, setTemplateName] = useState("direct_alert");
   const [languageCode, setLanguageCode] = useState("ar");
   const [parameters, setParameters] = useState<string[]>([]);
   const [headerUrl, setHeaderUrl] = useState("");
-  const [selectedInvoiceNum, setSelectedInvoiceNum] = useState("");
+  const [lockedInvoice, setLockedInvoice] = useState<RelatedOracleInvoice | null>(null);
+
+  // Lookup by any Onyx invoice number & recent PDFs list
+  const [invoiceSearch, setInvoiceSearch] = useState("");
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupFeedback, setLookupFeedback] = useState<string>("");
+  const [recentPdfInvoices, setRecentPdfInvoices] = useState<RelatedOracleInvoice[]>([]);
+
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+
+  function applyInvoice(inv: RelatedOracleInvoice) {
+    const def = getOnyxTemplate(inv.doc_type);
+    setLockedInvoice(inv);
+    setDocType(def.id);
+    setTemplateName(def.defaultMetaTemplateName);
+    setHeaderUrl(inv.attachment_url || "");
+    setInvoiceSearch(inv.invoice_number);
+    setLookupFeedback("");
+    setError("");
+    setParameters(
+      extractTemplateParameters(def.id, {
+        ...inv,
+        customer_name: inv.customer_name || customerName || "عميلنا العزيز",
+      })
+    );
+  }
+
+  function clearLockedInvoiceToFreeNotice() {
+    const def = getOnyxTemplate("direct_alert");
+    setLockedInvoice(null);
+    setDocType(def.id);
+    setTemplateName(def.defaultMetaTemplateName);
+    setHeaderUrl("");
+    setInvoiceSearch("");
+    setLookupFeedback("");
+    setError("");
+    setParameters(
+      extractTemplateParameters("direct_alert", {
+        invoice_number: "-",
+        customer_name: customerName || "عميلنا العزيز",
+        phone,
+        invoice_date: new Date().toISOString().slice(0, 10),
+        amount: "0",
+        currency: "ر.س",
+      })
+    );
+  }
 
   useEffect(() => {
     if (!isOpen) return;
     setError("");
+    setLookupFeedback("");
+
     const first = relatedInvoices[0];
     if (first) {
       applyInvoice(first);
     } else {
-      const def = getOnyxTemplate("cash_invoice");
-      setDocType(def.id);
-      setTemplateName(def.defaultMetaTemplateName);
-      setHeaderUrl("");
-      setSelectedInvoiceNum("");
-      setParameters(
-        extractTemplateParameters("cash_invoice", {
-          invoice_number: "-",
-          customer_name: customerName || "عميلنا العزيز",
-          phone,
-          invoice_date: new Date().toISOString().slice(0, 10),
-          amount: "0",
-          currency: "ر.س",
-        })
-      );
+      clearLockedInvoiceToFreeNotice();
     }
+
+    // Fetch recent exported Onyx PDF invoices automatically
+    fetch("/api/whatsapp/inbox?pdfInvoices=1", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.success && Array.isArray(data.invoices)) {
+          setRecentPdfInvoices(data.invoices);
+        }
+      })
+      .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, phone]);
 
-  function applyInvoice(inv: RelatedOracleInvoice) {
-    const def = getOnyxTemplate(inv.doc_type);
-    setDocType(def.id);
-    setTemplateName(def.defaultMetaTemplateName);
-    setHeaderUrl(inv.attachment_url || "");
-    setSelectedInvoiceNum(inv.invoice_number);
-    setParameters(extractTemplateParameters(def.id, inv));
+  // Automatically recognize any exported Onyx invoice number as soon as typed
+  useEffect(() => {
+    if (!isOpen) return;
+    const trimmed = invoiceSearch.trim();
+    if (!trimmed || lockedInvoice?.invoice_number === trimmed || trimmed.length < 4) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      handleLookupInvoice(trimmed);
+    }, 380);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceSearch, isOpen]);
+
+  async function handleLookupInvoice(targetNum?: string) {
+    const num = (targetNum ?? invoiceSearch).trim();
+    if (!num) return;
+
+    // First check local arrays immediately
+    const localMatch =
+      relatedInvoices.find((i) => i.invoice_number === num) ||
+      recentPdfInvoices.find((i) => i.invoice_number === num);
+    if (localMatch) {
+      applyInvoice(localMatch);
+      return;
+    }
+
+    setLookupLoading(true);
+    setLookupFeedback("");
+    setError("");
+    try {
+      const res = await fetch(
+        `/api/whatsapp/inbox?lookupInvoice=${encodeURIComponent(num)}`,
+        { cache: "no-store" }
+      );
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const data = await res.json();
+      if (data?.success && data.invoice) {
+        applyInvoice(data.invoice);
+      } else {
+        setLookupFeedback(`لم يتم العثور على مستند برقم (${num}) في أونكس بعد.`);
+      }
+    } catch {
+      setLookupFeedback("تعذر البحث عن رقم الفاتورة حالياً.");
+    } finally {
+      setLookupLoading(false);
+    }
   }
 
   function handleDocTypeChange(nextType: OnyxDocType) {
+    // Strictly block changing template type when an Onyx invoice is locked
+    if (lockedInvoice && nextType !== getOnyxTemplate(lockedInvoice.doc_type).id) {
+      return;
+    }
     const def = getOnyxTemplate(nextType);
     setDocType(nextType);
     setTemplateName(def.defaultMetaTemplateName);
-    const matching = relatedInvoices.find((i) => i.doc_type === nextType);
-    if (matching) {
-      applyInvoice(matching);
-      return;
-    }
     setParameters((prev) =>
       def.variables.map((v, idx) =>
         v.key === "customer_name" && !prev[idx]
@@ -101,7 +186,8 @@ export default function WhatsAppInboxTemplateModal({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          invoiceNumber: selectedInvoiceNum || `MSG-${Date.now().toString().slice(-6)}`,
+          invoiceNumber:
+            lockedInvoice?.invoice_number || `MSG-${Date.now().toString().slice(-6)}`,
           phone,
           customerName,
           docType,
@@ -138,6 +224,9 @@ export default function WhatsAppInboxTemplateModal({
 
   const activeDef = getOnyxTemplate(docType);
   const preview = formatTemplatePreviewText(docType, parameters);
+  const lockedExpectedId = lockedInvoice
+    ? getOnyxTemplate(lockedInvoice.doc_type).id
+    : null;
 
   return (
     <div
@@ -147,7 +236,9 @@ export default function WhatsAppInboxTemplateModal({
       <div className="max-h-[92vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white shadow-2xl border border-slate-200">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
           <div>
-            <h2 className="text-lg font-black text-slate-900">إرسال قالب رسمي معتمد (Meta Template)</h2>
+            <h2 className="text-lg font-black text-slate-900">
+              إرسال قالب رسمي معتمد (Meta Template)
+            </h2>
             <p className="text-xs font-bold text-slate-500">
               إلى: {customerName || phone} (<span dir="ltr">{phone}</span>) — يعمل في أي وقت حتى بعد الـ 24 ساعة
             </p>
@@ -162,45 +253,151 @@ export default function WhatsAppInboxTemplateModal({
         </div>
 
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          {/* Customer Invoices Quick Picker */}
           {relatedInvoices.length > 0 && (
             <div>
-              <p className="mb-2 text-xs font-black text-slate-700">مستندات أونكس المرتبطة بهذا الرقم:</p>
+              <p className="mb-2 text-xs font-black text-slate-700">
+                فواتير ومستندات العميل من أونكس:
+              </p>
               <div className="flex flex-wrap gap-2">
-                {relatedInvoices.slice(0, 6).map((inv) => (
-                  <button
-                    key={inv.invoice_number}
-                    type="button"
-                    onClick={() => applyInvoice(inv)}
-                    className={`rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
-                      selectedInvoiceNum === inv.invoice_number
-                        ? "border-emerald-600 bg-emerald-50 text-emerald-800"
-                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-                    }`}
-                  >
-                    #{inv.invoice_number} • {inv.amount} {inv.currency}
-                  </button>
-                ))}
+                {relatedInvoices.slice(0, 8).map((inv) => {
+                  const invDef = getOnyxTemplate(inv.doc_type);
+                  const isActive = lockedInvoice?.invoice_number === inv.invoice_number;
+                  return (
+                    <button
+                      key={inv.invoice_number}
+                      type="button"
+                      onClick={() => applyInvoice(inv)}
+                      className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                        isActive
+                          ? "border-emerald-600 bg-emerald-50 text-emerald-900 ring-1 ring-emerald-500/30"
+                          : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      <span>#{inv.invoice_number}</span>
+                      <span className="text-[10px] text-slate-500">• {invDef.shortLabel}</span>
+                      {inv.has_onyx_pdf && (
+                        <span className="rounded-md bg-emerald-600 px-1.5 py-0.5 text-[9px] font-black text-white">
+                          PDF
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}
 
-          <div>
-            <p className="mb-2 text-xs font-black text-slate-700">اختر نوع القالب:</p>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              {ONYX_TEMPLATE_LIST.map((tpl) => (
+          {/* Lookup Any Onyx Invoice / Auto-Detect Exported PDFs */}
+          <div className="rounded-2xl border border-slate-200/80 bg-[#f8fafc] p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-black text-slate-700">
+                ربط برقم فاتورة / مستند أونكس (يجلب رابط الـ PDF ويحدد القالب تلقائياً):
+              </label>
+              {lockedInvoice && (
                 <button
-                  key={tpl.id}
                   type="button"
-                  onClick={() => handleDocTypeChange(tpl.id)}
-                  className={`rounded-xl border px-2.5 py-2 text-xs font-bold text-right transition ${
-                    docType === tpl.id
-                      ? "border-emerald-600 bg-emerald-50 text-emerald-800"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
+                  onClick={clearLockedInvoiceToFreeNotice}
+                  className="text-[11px] font-bold text-slate-500 underline hover:text-slate-800"
                 >
-                  {tpl.shortLabel}
+                  إلغاء الربط (إشعار عام)
                 </button>
-              ))}
+              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                dir="ltr"
+                value={invoiceSearch}
+                onChange={(e) => setInvoiceSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleLookupInvoice();
+                  }
+                }}
+                placeholder="مثال: 2601020005 أو ARST-..."
+                className="flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 font-mono text-xs font-bold outline-none focus:border-emerald-600"
+              />
+              <button
+                type="button"
+                disabled={lookupLoading || !invoiceSearch.trim()}
+                onClick={() => handleLookupInvoice()}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-black text-white transition hover:bg-emerald-700 disabled:opacity-40"
+              >
+                {lookupLoading ? "جاري البحث..." : "جلب الفاتورة"}
+              </button>
+            </div>
+
+            {lookupFeedback && (
+              <p className="text-[11px] font-bold text-amber-700">{lookupFeedback}</p>
+            )}
+
+            {recentPdfInvoices.length > 0 && (
+              <div className="pt-1">
+                <p className="mb-1.5 text-[10.5px] font-bold text-slate-500">
+                  أحدث فواتير متصدرة بملف PDF جاهز في أونكس:
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {recentPdfInvoices.slice(0, 5).map((pdfInv) => (
+                    <button
+                      key={pdfInv.invoice_number}
+                      type="button"
+                      onClick={() => applyInvoice(pdfInv)}
+                      className={`rounded-lg border px-2 py-1 text-[10.5px] font-bold transition ${
+                        lockedInvoice?.invoice_number === pdfInv.invoice_number
+                          ? "border-emerald-600 bg-emerald-100 text-emerald-900"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-emerald-400"
+                      }`}
+                    >
+                      <span dir="ltr">{pdfInv.invoice_number}</span> ({getOnyxTemplate(pdfInv.doc_type).shortLabel} • PDF)
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Template Selector (Strictly Locked when an Onyx Invoice is Selected) */}
+          <div>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-black text-slate-700">نوع القالب المعتمد:</p>
+              {lockedInvoice && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[10.5px] font-black text-amber-900">
+                  مقفل تلقائياً على ({activeDef.label}) فقط للمستند #{lockedInvoice.invoice_number}
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {ONYX_TEMPLATE_LIST.map((tpl) => {
+                const isSelected = docType === tpl.id;
+                const isLockedDisabled =
+                  Boolean(lockedExpectedId) && tpl.id !== lockedExpectedId;
+                return (
+                  <button
+                    key={tpl.id}
+                    type="button"
+                    disabled={isLockedDisabled}
+                    onClick={() => handleDocTypeChange(tpl.id)}
+                    title={
+                      isLockedDisabled
+                        ? `مقفل: لا يمكن إرسال هذا المستند إلا بقالب (${activeDef.label})`
+                        : tpl.label
+                    }
+                    className={`rounded-xl border px-2.5 py-2 text-xs font-bold text-right transition ${
+                      isSelected
+                        ? "border-emerald-600 bg-emerald-50 text-emerald-900 ring-1 ring-emerald-500/30"
+                        : isLockedDisabled
+                          ? "border-slate-100 bg-slate-100/70 text-slate-300 cursor-not-allowed opacity-55"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {tpl.shortLabel}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -213,8 +410,8 @@ export default function WhatsAppInboxTemplateModal({
                 type="text"
                 dir="ltr"
                 value={templateName}
-                onChange={(e) => setTemplateName(e.target.value)}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-mono font-bold outline-none focus:border-emerald-600"
+                readOnly
+                className="w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-100 px-3 py-2 text-sm font-mono font-bold text-slate-600 outline-none"
               />
             </div>
             <div>
@@ -230,16 +427,32 @@ export default function WhatsAppInboxTemplateModal({
           </div>
 
           {activeDef.hasAttachment && (
-            <div>
-              <label className="mb-1 block text-xs font-black text-slate-600">
-                رابط ملف الـ PDF المرفق في الهيدر (اختياري)
-              </label>
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="block text-xs font-black text-slate-700">
+                  رابط ملف الـ PDF المرفق في الهيدر:
+                </label>
+                {headerUrl ? (
+                  <a
+                    href={headerUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="rounded-lg bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-[11px] font-black text-emerald-700 hover:underline"
+                  >
+                    ✓ تم جلب رابط PDF تلقائياً — معاينة ↗
+                  </a>
+                ) : (
+                  <span className="text-[11px] font-bold text-slate-400">
+                    لم يُرفع ملف PDF أصلي من أونكس لهذا الرقم بعد
+                  </span>
+                )}
+              </div>
               <input
                 type="url"
                 dir="ltr"
                 value={headerUrl}
                 onChange={(e) => setHeaderUrl(e.target.value)}
-                placeholder="https://www.modernbuildingsa.com/api/media/..."
+                placeholder="https://www.modernbuildingsa.com/api/oracle-orders/pdf/..."
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-mono outline-none focus:border-emerald-600"
               />
             </div>
@@ -292,7 +505,7 @@ export default function WhatsAppInboxTemplateModal({
               disabled={sending}
               className="rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-emerald-700 disabled:opacity-50"
             >
-              {sending ? "جاري الإرسال..." : "إرسال القالب عبر واتساب"}
+              {sending ? "جاري الإرسال..." : `إرسال (${activeDef.shortLabel}) عبر واتساب`}
             </button>
           </div>
         </form>

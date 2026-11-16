@@ -166,16 +166,6 @@ export default function WhatsAppInvoicesPage() {
     setActionMessage(null);
   }
 
-  // Switch template type inside modal
-  function handleModalDocTypeChange(newType: OnyxDocType) {
-    setActiveDocType(newType);
-    const templateDef = getOnyxTemplate(newType);
-    setTemplateName(templateDef.defaultMetaTemplateName);
-    if (selectedInvoice) {
-      setParameters(extractTemplateParameters(newType, selectedInvoice));
-    }
-  }
-
   // Update a single variable value
   function handleParamChange(index: number, value: string) {
     setParameters((prev) => {
@@ -732,15 +722,20 @@ export default function WhatsAppInvoicesPage() {
               <div className="grid gap-6 md:grid-cols-2">
                 {/* Left: Template Settings & Variables */}
                 <div className="space-y-4">
-                  {/* Template Type Selector */}
+                  {/* Template Type Selector (Strictly Locked to Document's Onyx Type) */}
                   <div>
-                    <label className="text-xs font-black text-gray-700">
-                      نوع القالب (مطابق لقوالب Word / Onyx):
-                    </label>
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-xs font-black text-gray-700">
+                        نوع القالب (مطابق لقوالب Word / Onyx):
+                      </label>
+                      <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-black text-amber-800">
+                        مقفل حسب نوع المستند
+                      </span>
+                    </div>
                     <select
                       value={activeDocType}
-                      onChange={(e) => handleModalDocTypeChange(e.target.value as OnyxDocType)}
-                      className="mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-xs font-bold text-gray-800 outline-none focus:border-green-600"
+                      disabled
+                      className="mt-1.5 w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-3 py-2.5 text-xs font-bold text-gray-700 outline-none"
                     >
                       {ONYX_TEMPLATE_LIST.map((tpl) => (
                         <option key={tpl.id} value={tpl.id}>
@@ -788,8 +783,8 @@ export default function WhatsAppInvoicesPage() {
                         <input
                           type="text"
                           value={templateName}
-                          onChange={(e) => setTemplateName(e.target.value)}
-                          className="mt-1 w-full rounded-xl border border-gray-200 px-3 py-2 font-mono text-xs font-bold outline-none focus:border-green-600"
+                          readOnly
+                          className="mt-1 w-full cursor-not-allowed rounded-xl border border-gray-200 bg-gray-100 px-3 py-2 font-mono text-xs font-bold text-gray-600 outline-none"
                         />
                       </div>
                       <div>

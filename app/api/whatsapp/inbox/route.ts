@@ -5,6 +5,8 @@ import {
   deleteSelectedMessages,
   getConversationDetail,
   getInboxConversations,
+  getRecentOnyxPdfInvoices,
+  lookupOracleInvoiceWithPdf,
 } from "@/lib/whatsapp-inbox";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +21,23 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const lookupInvoice = request.nextUrl.searchParams.get("lookupInvoice");
+    if (lookupInvoice !== null) {
+      const invoice = await lookupOracleInvoiceWithPdf(lookupInvoice);
+      return NextResponse.json({
+        success: true,
+        invoice,
+      });
+    }
+
+    if (request.nextUrl.searchParams.get("pdfInvoices") === "1") {
+      const invoices = await getRecentOnyxPdfInvoices(25);
+      return NextResponse.json({
+        success: true,
+        invoices,
+      });
+    }
+
     const phone = request.nextUrl.searchParams.get("phone");
     const search = request.nextUrl.searchParams.get("q") || undefined;
 

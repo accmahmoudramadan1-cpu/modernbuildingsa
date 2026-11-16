@@ -526,15 +526,19 @@ export async function getConversationDetail(rawPhone: string): Promise<{
   let relatedInvoices: any[] = [];
   if (variants.length > 0) {
     const placeholders = variants.map(() => "?").join(", ");
-    relatedInvoices = await queryRows<any>(
-      `SELECT invoice_number, doc_type, customer_name, phone, invoice_date, amount, currency,
-              remaining_balance, payment_method, attachment_url, details, status
-       FROM oracle_invoices
-       WHERE phone IN (${placeholders})
-       ORDER BY created_at DESC
-       LIMIT 15`,
+    const rows = await queryRows<any>(
+      `SELECT o.invoice_number, o.doc_type, o.customer_name, o.phone, o.invoice_date,
+              o.amount, o.currency, o.remaining_balance, o.payment_method,
+              o.attachment_url, o.details, o.status,
+              (p.invoice_number IS NOT NULL) AS has_pdf_blob
+       FROM oracle_invoices o
+       LEFT JOIN oracle_pdfs p ON p.invoice_number = o.invoice_number
+       WHERE o.phone IN (${placeholders})
+       ORDER BY o.created_at DESC
+       LIMIT 30`,
       variants
     ).catch(() => []);
+    relatedInvoices = rows.map(mapOracleInvoiceWithPdf);
   }
 
   const convRow = convRows[0];
@@ -634,6 +638,109 @@ export async function deleteSelectedMessages(rawPhone: string, ids: string[]): P
       `UPDATE whatsapp_conversations SET last_message_text = NULL WHERE phone = ?`,
       [normPhone]
     );
+  }
+}
+
+export function buildOnyxPdfPublicUrl(invoiceNumber: string): string {
+  const base =
+    (process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com").replace(/\/+$/, "");
+  return `${base}/api/oracle-orders/pdf/${encodeURIComponent(String(invoiceNumber).trim())}`;
+}
+
+function mapOracleInvoiceWithPdf(row: any) {
+  const invNum = String(row.invoice_number || "").trim();
+  const explicitUrl = row.attachment_url ? String(row.attachment_url).trim() : "";
+  const hasPdfBlob = Boolean(Number(row.has_pdf_blob || 0));
+  const resolvedPdfUrl = explicitUrl || (hasPdfBlob && invNum ? buildOnyxPdfPublicUrl(invNum) : null);
+
+  return {
+    invoice_number: invNum,
+    doc_type: String(row.doc_type || "cash_invoice"),
+    customer_name: row.customer_name ? String(row.customer_name) : "",
+    phone: row.phone ? String(row.phone) : "",
+    invoice_date: row.invoice_date ? String(row.invoice_date) : "",
+    amount: Number(row.amount ?? 0),
+    currency: row.currency ? String(row.currency) : "ر.س",
+    remaining_balance:
+      row.remaining_balance !== null && row.remaining_balance !== undefined
+        ? Number(row.remaining_balance)
+        : null,
+    payment_method: row.payment_method ? String(row.payment_method) : null,
+    attachment_url: resolvedPdfUrl,
+    has_onyx_pdf: Boolean(resolvedPdfUrl),
+    details: row.details ? String(row.details) : "",
+    status: row.status ? String(row.status) : "pending",
+  };
+}
+
+export async function lookupOracleInvoiceWithPdf(invoiceNumber: string) {
+  const cleanNum = String(invoiceNumber || "").trim();
+  if (!cleanNum || !isMysqlConfigured()) return null;
+
+  try {
+    const rows = await queryRows<any>(
+      `SELECT o.invoice_number, o.doc_type, o.customer_name, o.phone, o.invoice_date,
+              o.amount, o.currency, o.remaining_balance, o.payment_method,
+              o.attachment_url, o.details, o.status,
+              (p.invoice_number IS NOT NULL) AS has_pdf_blob
+       FROM oracle_invoices o
+       LEFT JOIN oracle_pdfs p ON p.invoice_number = o.invoice_number
+       WHERE o.invoice_number = ?
+       LIMIT 1`,
+      [cleanNum]
+    );
+    if (rows.length > 0) {
+      return mapOracleInvoiceWithPdf(rows[0]);
+    }
+
+    // Also check oracle_pdfs directly in case PDF was uploaded before invoice metadata sync
+    const pdfRows = await queryRows<any>(
+      `SELECT invoice_number, created_at FROM oracle_pdfs WHERE invoice_number = ? LIMIT 1`,
+      [cleanNum]
+    );
+    if (pdfRows.length > 0) {
+      return {
+        invoice_number: cleanNum,
+        doc_type: "cash_invoice",
+        customer_name: "",
+        phone: "",
+        invoice_date: new Date().toISOString().slice(0, 10),
+        amount: 0,
+        currency: "ر.س",
+        remaining_balance: null,
+        payment_method: null,
+        attachment_url: buildOnyxPdfPublicUrl(cleanNum),
+        has_onyx_pdf: true,
+        details: "",
+        status: "pending",
+      };
+    }
+  } catch (err) {
+    console.warn("[WhatsApp Inbox] Invoice lookup failed:", err);
+  }
+  return null;
+}
+
+export async function getRecentOnyxPdfInvoices(limit = 20) {
+  if (!isMysqlConfigured()) return [];
+  const safeLimit = Math.min(50, Math.max(1, Number(limit) || 20));
+  try {
+    const rows = await queryRows<any>(
+      `SELECT o.invoice_number, o.doc_type, o.customer_name, o.phone, o.invoice_date,
+              o.amount, o.currency, o.remaining_balance, o.payment_method,
+              o.attachment_url, o.details, o.status,
+              1 AS has_pdf_blob
+       FROM oracle_invoices o
+       LEFT JOIN oracle_pdfs p ON p.invoice_number = o.invoice_number
+       WHERE (o.attachment_url IS NOT NULL AND o.attachment_url <> '')
+          OR p.invoice_number IS NOT NULL
+       ORDER BY COALESCE(p.created_at, o.created_at) DESC
+       LIMIT ${safeLimit}`
+    );
+    return rows.map(mapOracleInvoiceWithPdf);
+  } catch (err) {
+    console.warn("[WhatsApp Inbox] Failed to load PDF invoices:", err);
+    return [];
   }
 }
 

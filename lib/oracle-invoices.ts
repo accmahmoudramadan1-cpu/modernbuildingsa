@@ -188,25 +188,39 @@ function toMysqlDateTime(isoOrDate?: string | null): string {
 export async function getOracleInvoices(): Promise<OracleInvoice[]> {
   if (isMysqlConfigured()) {
     try {
+      const publicBase =
+        (process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com").replace(/\/+$/, "");
       const rows = await queryRows<any>(
-        `SELECT id, invoice_number, doc_type, customer_code, customer_name, phone,
-                invoice_date, amount, currency, remaining_balance, payment_method,
-                attachment_url, onyx_form_code, details, status, whatsapp_message_id,
-                sent_at, created_at, updated_at
-         FROM oracle_invoices
-         ORDER BY created_at DESC`
+        `SELECT o.id, o.invoice_number, o.doc_type, o.customer_code, o.customer_name, o.phone,
+                o.invoice_date, o.amount, o.currency, o.remaining_balance, o.payment_method,
+                o.attachment_url, o.onyx_form_code, o.details, o.status, o.whatsapp_message_id,
+                o.sent_at, o.created_at, o.updated_at,
+                (p.invoice_number IS NOT NULL) AS has_pdf_blob
+         FROM oracle_invoices o
+         LEFT JOIN oracle_pdfs p ON p.invoice_number = o.invoice_number
+         ORDER BY o.created_at DESC`
       );
       if (rows.length > 0) {
-        return rows.map((row: any) => ({
-          ...row,
-          amount: Number(row.amount ?? 0),
-          remaining_balance:
-            row.remaining_balance !== null && row.remaining_balance !== undefined
-              ? Number(row.remaining_balance)
-              : null,
-          doc_type: (row.doc_type || "cash_invoice") as OnyxDocType,
-          payment_method: normalizePaymentMethod(row.payment_method),
-        })) as OracleInvoice[];
+        return rows.map((row: any) => {
+          const invNum = String(row.invoice_number || "").trim();
+          const explicitUrl = row.attachment_url ? String(row.attachment_url).trim() : "";
+          const resolvedUrl =
+            explicitUrl ||
+            (Number(row.has_pdf_blob || 0) && invNum
+              ? `${publicBase}/api/oracle-orders/pdf/${encodeURIComponent(invNum)}`
+              : null);
+          return {
+            ...row,
+            attachment_url: resolvedUrl,
+            amount: Number(row.amount ?? 0),
+            remaining_balance:
+              row.remaining_balance !== null && row.remaining_balance !== undefined
+                ? Number(row.remaining_balance)
+                : null,
+            doc_type: (row.doc_type || "cash_invoice") as OnyxDocType,
+            payment_method: normalizePaymentMethod(row.payment_method),
+          };
+        }) as OracleInvoice[];
       }
       return [];
     } catch (err) {

@@ -5,6 +5,7 @@ import {
   formatPhoneNumber,
 } from "@/lib/whatsapp";
 import { updateInvoiceWhatsAppStatus } from "@/lib/oracle-invoices";
+import { lookupOracleInvoiceWithPdf } from "@/lib/whatsapp-inbox";
 import {
   extractTemplateParameters,
   formatTemplatePreviewText,
@@ -69,6 +70,42 @@ export async function POST(request: NextRequest) {
       process.env.WHATSAPP_INVOICE_TEMPLATE_NAME ||
       "invoice_utility";
 
+    // Authoritative Onyx DB enforcement: lock to the invoice's real doc_type & resolve PDF automatically
+    const authoritativeInvoice = await lookupOracleInvoiceWithPdf(String(invoiceNumber));
+    if (authoritativeInvoice) {
+      const expectedDef = getOnyxTemplate(authoritativeInvoice.doc_type);
+      if (resolvedDocType !== expectedDef.id) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `مرفوض: المستند رقم (${invoiceNumber}) نوعه (${expectedDef.label}) فقط، ولا يمكن إرساله بقالب (${templateDef.label}).`,
+          },
+          { status: 400 }
+        );
+      }
+      if (
+        sendMode === "template" &&
+        resolvedTemplateName !== expectedDef.defaultMetaTemplateName
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `مرفوض: اسم القالب في Meta للمستند رقم (${invoiceNumber}) يجب أن يكون (${expectedDef.defaultMetaTemplateName}) فقط.`,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    const effectiveHeaderUrl =
+      (headerUrl && String(headerUrl).trim()) ||
+      authoritativeInvoice?.attachment_url ||
+      undefined;
+    const effectiveCustomerName =
+      (customerName && String(customerName).trim()) ||
+      authoritativeInvoice?.customer_name ||
+      undefined;
+
     const bodyParameters: string[] =
       Array.isArray(customParameters) && customParameters.length > 0
         ? customParameters.map((p: any) => String(p ?? "").trim())
@@ -89,11 +126,11 @@ export async function POST(request: NextRequest) {
 
     if (sendMode === "text") {
       let fullText = formatTemplatePreviewText(resolvedDocType, bodyParameters);
-      if (headerUrl && String(headerUrl).trim()) {
-        fullText += `\n\nرابط المرفق:\n${String(headerUrl).trim()}`;
+      if (effectiveHeaderUrl) {
+        fullText += `\n\nرابط المرفق:\n${effectiveHeaderUrl}`;
       }
       result = await sendWhatsAppMessage(phone, fullText, {
-        customerName: customerName || undefined,
+        customerName: effectiveCustomerName,
       });
     } else {
       const publicBaseUrl =
@@ -107,10 +144,10 @@ export async function POST(request: NextRequest) {
         templateName: resolvedTemplateName,
         languageCode,
         bodyParameters,
-        headerUrl: headerUrl ? String(headerUrl).trim() : undefined,
+        headerUrl: effectiveHeaderUrl,
         fallbackPdfUrl,
         documentFilename: `ModernBuilding_${String(invoiceNumber).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`,
-        customerName: customerName || undefined,
+        customerName: effectiveCustomerName,
         previewText: formatTemplatePreviewText(resolvedDocType, bodyParameters),
       });
     }

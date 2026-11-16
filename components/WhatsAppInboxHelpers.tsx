@@ -9,7 +9,7 @@ import type {
 import type { OnyxDocType } from "@/lib/onyx-templates";
 
 export interface RelatedOracleInvoice {
-  id: string;
+  id?: string;
   invoice_number: string;
   doc_type: OnyxDocType;
   customer_name: string;
@@ -20,9 +20,10 @@ export interface RelatedOracleInvoice {
   remaining_balance?: number | string | null;
   payment_method?: string | null;
   attachment_url?: string | null;
+  has_onyx_pdf?: boolean;
   details?: string;
   status: string;
-  created_at: string;
+  created_at?: string;
 }
 
 export type { WhatsAppConversationRecord, WhatsAppMessageRecord };
