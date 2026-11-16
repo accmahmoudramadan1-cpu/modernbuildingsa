@@ -57,6 +57,7 @@ UPLOAD_PDF_ENDPOINT = os.getenv(
 )
 API_KEY = os.getenv("ORACLE_SYNC_API_KEY", "modern_building_orant_sync_secret_2026")
 PDF_EXPORT_DIR = os.getenv("ORACLE_PDF_EXPORT_DIR", "").strip()
+PDF_WAIT_SECONDS = int(os.getenv("ORACLE_PDF_WAIT_SECONDS", "40"))
 
 # إعدادات اتصال أوراكل (مطابقة لملف tnsnames.ora في OraNT وبيانات العميل)
 ORACLE_HOST = os.getenv("ORACLE_HOST", "onyxserver")
@@ -90,7 +91,7 @@ ONYX_QUERIES = {
                 CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
                 TO_CHAR(NVL(M.C_CODE, M.C_CODE_CSH)) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, M.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
-                COALESCE(C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO, M.C_TEL) AS PHONE,
+                COALESCE(C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO, M.C_TEL) AS PHONE,
                 TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(
                     NVL((
@@ -107,7 +108,11 @@ ONYX_QUERIES = {
                 NULL AS REMAINING_BALANCE,
                 CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
                 'SI' AS FORM_CODE,
-                M.A_DESC AS DETAILS
+                M.A_DESC AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(M.BILL_SER) AS DOC_SRL,
+                TO_CHAR(M.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(M.AD_U_ID) AS AD_UID
             FROM IAS_BILL_MST M
             LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
             LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = M.C_CODE_CSH
@@ -138,7 +143,11 @@ ONYX_QUERIES = {
                 NULL AS REMAINING_BALANCE,
                 CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
                 'SI' AS FORM_CODE,
-                M.A_DESC AS DETAILS
+                M.A_DESC AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(M.BILL_SER) AS DOC_SRL,
+                NULL AS AD_TS,
+                NULL AS AD_UID
             FROM IAS_BILL_MST M
             LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(M.BILL_CURRENCY)
@@ -157,6 +166,41 @@ ONYX_QUERIES = {
                 'receipt_voucher' AS DOC_TYPE,
                 TO_CHAR(C.C_CODE) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, V.REC_NAME, V.REF_NAME, 'عميل') AS CUST_NAME,
+                COALESCE(C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
+                TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                ROUND(NVL(SUM(NVL(VD.AC_AMT, 0)), NVL(MAX(V.CASH_AMT), 0)), 2) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(V.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(V.A_CY), 'ر.س'))) AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                CASE NVL(V.VOUCHER_PAY_TYPE, 1)
+                    WHEN 1 THEN 'نقداً'
+                    WHEN 2 THEN 'حوالة'
+                    WHEN 3 THEN 'تحويل بنكي'
+                    ELSE 'نقداً / تحويل بنكي'
+                END AS PAYMENT_METHOD,
+                'RV' AS FORM_CODE,
+                NVL(MAX(VD.AC_DESC), V.A_DESC) AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(MAX(V.V_SER)) AS DOC_SRL,
+                TO_CHAR(MAX(V.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(MAX(V.AD_U_ID)) AS AD_UID
+            FROM VOUCHERS V
+            JOIN VOUCHER_DETAIL VD ON VD.V_SER = V.V_SER AND VD.VOUCHER_TYPE = V.VOUCHER_TYPE
+            JOIN CUSTOMER C ON C.C_CODE = COALESCE(VD.C_CODE, VD.AC_CODE_DTL)
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(V.A_CY)
+            WHERE V.VOUCHER_TYPE = 1
+              AND V.VOUCHER_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            GROUP BY
+                V.VOUCHER_NO, C.C_CODE, C.C_A_NAME, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE,
+                V.REC_NAME, V.REF_NAME, V.VOUCHER_DATE, V.VOUCHER_PAY_TYPE,
+                V.A_CY, E.CUR_NAME, V.A_DESC
+            ORDER BY V.VOUCHER_DATE DESC, V.VOUCHER_NO DESC
+            """,
+            f"""
+            SELECT
+                'RV-' || TO_CHAR(V.VOUCHER_NO) || '-' || TO_CHAR(C.C_CODE) AS DOC_NO,
+                'receipt_voucher' AS DOC_TYPE,
+                TO_CHAR(C.C_CODE) AS CUST_CODE,
+                COALESCE(C.C_A_NAME, V.REC_NAME, V.REF_NAME, 'عميل') AS CUST_NAME,
                 NVL(C.C_MOBILE, C.C_PHONE) AS PHONE,
                 TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(NVL(SUM(NVL(VD.AC_AMT, 0)), NVL(MAX(V.CASH_AMT), 0)), 2) AS AMOUNT,
@@ -169,7 +213,11 @@ ONYX_QUERIES = {
                     ELSE 'نقداً / تحويل بنكي'
                 END AS PAYMENT_METHOD,
                 'RV' AS FORM_CODE,
-                NVL(MAX(VD.AC_DESC), V.A_DESC) AS DETAILS
+                NVL(MAX(VD.AC_DESC), V.A_DESC) AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(MAX(V.V_SER)) AS DOC_SRL,
+                NULL AS AD_TS,
+                NULL AS AD_UID
             FROM VOUCHERS V
             JOIN VOUCHER_DETAIL VD ON VD.V_SER = V.V_SER AND VD.VOUCHER_TYPE = V.VOUCHER_TYPE
             JOIN CUSTOMER C ON C.C_CODE = COALESCE(VD.C_CODE, VD.AC_CODE_DTL)
@@ -194,7 +242,7 @@ ONYX_QUERIES = {
                 CASE WHEN D.ATTCH_EMAIL_FILE IS NOT NULL THEN 'account_statement' ELSE 'direct_alert' END AS DOC_TYPE,
                 TO_CHAR(D.RCVR_CODE) AS CUST_CODE,
                 COALESCE(D.RCVR_NM, C.C_A_NAME, 'عميل') AS CUST_NAME,
-                COALESCE(D.MOBILE_NO, H.MOBILE_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
+                COALESCE(D.MOBILE_NO, H.MOBILE_NO, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
                 TO_CHAR(NVL(H.AD_DATE, SYSDATE), 'YYYY-MM-DD') AS DOC_DATE,
                 TO_CHAR(D.BLNC_MSG) AS AMOUNT,
                 'ر.س' AS CURRENCY,
@@ -202,7 +250,10 @@ ONYX_QUERIES = {
                 NULL AS PAYMENT_METHOD,
                 'ALRTT002' AS FORM_CODE,
                 H.MSG_TXT AS DETAILS,
-                D.ATTCH_EMAIL_FILE AS ATTCH_PATH
+                D.ATTCH_EMAIL_FILE AS ATTCH_PATH,
+                TO_CHAR(H.MSG_NO) AS DOC_SRL,
+                TO_CHAR(H.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(H.AD_U_ID) AS AD_UID
             FROM IAS_MSG_SMS H
             JOIN IAS_MSG_SMS_DTL D ON D.MSG_NO = H.MSG_NO
             LEFT JOIN CUSTOMER C ON C.C_CODE = D.RCVR_CODE
@@ -221,7 +272,7 @@ ONYX_QUERIES = {
                 'price_quotation' AS DOC_TYPE,
                 TO_CHAR(NVL(Q.C_CODE, Q.C_CODE_CSH)) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, Q.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
-                COALESCE(Q.MOBILE_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
+                COALESCE(Q.MOBILE_NO, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
                 TO_CHAR(Q.QUOT_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(
                     NVL(
@@ -241,7 +292,11 @@ ONYX_QUERIES = {
                 NULL AS REMAINING_BALANCE,
                 NULL AS PAYMENT_METHOD,
                 'QT' AS FORM_CODE,
-                Q.A_DESC AS DETAILS
+                Q.A_DESC AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(Q.QUOT_SER) AS DOC_SRL,
+                TO_CHAR(NVL(Q.APRV_DATE, Q.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(Q.AD_U_ID) AS AD_UID
             FROM QUOTATION Q
             LEFT JOIN CUSTOMER C ON C.C_CODE = Q.C_CODE
             LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = Q.C_CODE_CSH
@@ -283,7 +338,11 @@ ONYX_QUERIES = {
                 NULL AS REMAINING_BALANCE,
                 NULL AS PAYMENT_METHOD,
                 'PO' AS FORM_CODE,
-                P.PO_DESC AS DETAILS
+                P.PO_DESC AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(P.PO_SER) AS DOC_SRL,
+                TO_CHAR(P.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(P.AD_U_ID) AS AD_UID
             FROM P_ORDER P
             LEFT JOIN V_DETAILS V ON V.V_CODE = P.V_CODE
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(P.CUR_CODE)
@@ -302,6 +361,40 @@ ONYX_QUERIES = {
                 'customer_discount_notice' AS DOC_TYPE,
                 TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH)) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
+                COALESCE(C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
+                TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                CASE
+                    WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
+                        THEN ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
+                    ELSE ROUND(SUM(NVL(B.ADD_DISCOUNT, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
+                END AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(N.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(N.A_CY), 'ر.س'))) AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                NVL(N.DOC_DESC, 'خصم سداد') AS PAYMENT_METHOD,
+                'ARST045' AS FORM_CODE,
+                N.DOC_DESC AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(MAX(N.DOC_SER)) AS DOC_SRL,
+                TO_CHAR(MAX(N.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(MAX(N.AD_U_ID)) AS AD_UID
+            FROM IAS_BILL_MST_ADD_DISC N
+            LEFT JOIN IAS_BILL_ADD_DISC_BILLS B ON B.DOC_SER = N.DOC_SER
+            LEFT JOIN CUSTOMER C ON C.C_CODE = COALESCE(N.C_CODE, B.C_CODE)
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = N.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(N.A_CY)
+            WHERE N.DOC_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            GROUP BY
+                N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
+                C.C_A_NAME, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.CUST_F_NM, CC.CUST_L_NM,
+                CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC
+            ORDER BY N.DOC_DATE DESC, N.DOC_NO DESC
+            """,
+            f"""
+            SELECT
+                'ARST-' || TO_CHAR(N.DOC_NO) || '-' || TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH, '0')) AS DOC_NO,
+                'customer_discount_notice' AS DOC_TYPE,
+                TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH)) AS CUST_CODE,
+                COALESCE(C.C_A_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
                 COALESCE(C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
                 TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 CASE
@@ -313,7 +406,11 @@ ONYX_QUERIES = {
                 NULL AS REMAINING_BALANCE,
                 NVL(N.DOC_DESC, 'خصم سداد') AS PAYMENT_METHOD,
                 'ARST045' AS FORM_CODE,
-                N.DOC_DESC AS DETAILS
+                N.DOC_DESC AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(MAX(N.DOC_SER)) AS DOC_SRL,
+                NULL AS AD_TS,
+                NULL AS AD_UID
             FROM IAS_BILL_MST_ADD_DISC N
             LEFT JOIN IAS_BILL_ADD_DISC_BILLS B ON B.DOC_SER = N.DOC_SER
             LEFT JOIN CUSTOMER C ON C.C_CODE = COALESCE(N.C_CODE, B.C_CODE)
@@ -342,36 +439,80 @@ def init_tracker_db():
             customer_name TEXT,
             phone TEXT,
             amount REAL,
+            pdf_uploaded INTEGER DEFAULT 0,
+            pdf_path TEXT,
             synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # إضافة عمود doc_type بأمان إذا كانت القاعدة منشأة سابقاً
-    try:
-        cur.execute("ALTER TABLE sent_invoices ADD COLUMN doc_type TEXT DEFAULT 'cash_invoice'")
-    except sqlite3.OperationalError:
-        pass
+    for alter_sql in (
+        "ALTER TABLE sent_invoices ADD COLUMN doc_type TEXT DEFAULT 'cash_invoice'",
+        "ALTER TABLE sent_invoices ADD COLUMN pdf_uploaded INTEGER DEFAULT 0",
+        "ALTER TABLE sent_invoices ADD COLUMN pdf_path TEXT",
+    ):
+        try:
+            cur.execute(alter_sql)
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
 
-def is_invoice_synced(invoice_number: str) -> bool:
-    """التحقق مما إذا كان المستند قد تم رفعه للموقع سابقاً"""
+def get_tracker_row(invoice_number: str):
+    """جلب حالة مزامنة المستند وحالة رفع ملف الـ PDF الأصلي الخاص به"""
     conn = sqlite3.connect(TRACKER_DB_PATH)
     cur = conn.cursor()
-    cur.execute("SELECT 1 FROM sent_invoices WHERE invoice_number = ?", (str(invoice_number).strip(),))
+    cur.execute(
+        "SELECT COALESCE(pdf_uploaded, 0), pdf_path FROM sent_invoices WHERE invoice_number = ?",
+        (str(invoice_number).strip(),),
+    )
     row = cur.fetchone()
     conn.close()
-    return row is not None
+    return row
 
 
-def mark_invoice_as_synced(invoice_number: str, doc_type: str, customer_name: str, phone: str, amount: float):
+def is_invoice_synced(invoice_number: str) -> bool:
+    """التحقق مما إذا كان المستند قد تم رفعه للموقع سابقاً"""
+    return get_tracker_row(invoice_number) is not None
+
+
+def mark_invoice_as_synced(
+    invoice_number: str,
+    doc_type: str,
+    customer_name: str,
+    phone: str,
+    amount: float,
+    pdf_uploaded: int = 0,
+    pdf_path: str = None,
+):
     """تسجيل المستند كمزامن بنجاح"""
     conn = sqlite3.connect(TRACKER_DB_PATH)
     cur = conn.cursor()
     cur.execute("""
-        INSERT OR REPLACE INTO sent_invoices (invoice_number, doc_type, customer_name, phone, amount)
-        VALUES (?, ?, ?, ?, ?)
-    """, (str(invoice_number).strip(), str(doc_type), customer_name, phone, float(amount or 0)))
+        INSERT OR REPLACE INTO sent_invoices (
+            invoice_number, doc_type, customer_name, phone, amount, pdf_uploaded, pdf_path
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        str(invoice_number).strip(),
+        str(doc_type),
+        customer_name,
+        phone,
+        float(amount or 0),
+        int(pdf_uploaded or 0),
+        pdf_path,
+    ))
+    conn.commit()
+    conn.close()
+
+
+def mark_pdf_as_uploaded(invoice_number: str, pdf_path: str):
+    """تحديث سجل المستند بعد رفع ملف PDF متأخر من أونكس"""
+    conn = sqlite3.connect(TRACKER_DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE sent_invoices SET pdf_uploaded = 1, pdf_path = ? WHERE invoice_number = ?",
+        (pdf_path, str(invoice_number).strip()),
+    )
     conn.commit()
     conn.close()
 
@@ -653,11 +794,12 @@ def check_extra_onyx_info():
     print("  فحص حالة عروض الأسعار ومسارات ملفات PDF في Onyx Pro")
     print("=" * 70)
 
-    if PDF_EXPORT_DIR:
-        idx = _build_pdf_index(PDF_EXPORT_DIR)
-        print(f"[✓] مجلد PDF ({PDF_EXPORT_DIR}): تم العثور على {len(idx)} ملف PDF.")
-        for stem, path, _ in idx[:5]:
-            print(f"    - {path}")
+    active_dirs = _auto_detect_default_pdf_dirs()
+    if active_dirs:
+        idx = _build_pdf_index(active_dirs)
+        print(f"[✓] مجلدات PDF ({active_dirs}): تم العثور على {len(idx)} ملف PDF.")
+        for entry in idx[:5]:
+            print(f"    - {entry[1]}")
     else:
         print("[i] متغير ORACLE_PDF_EXPORT_DIR غير محدد حالياً.")
 
@@ -679,6 +821,27 @@ def check_extra_onyx_info():
         """)
         for row in cur.fetchall():
             print(f"  - عرض #{row[0]} | تاريخ: {row[1]} | APPROVED={row[2]} | APRV_DATE={row[3]} | INACTIVE={row[4]}")
+
+        print("\n[+] آخر 10 مرفقات في عرض الرسائل التلقائي (S_V_MSG_MOBILE_AUTO.ATTCH_EMAIL_FILE):")
+        try:
+            cur.execute("""
+                SELECT SR_NO, DOC_TYP, DOC_SRL, MOBILE_NO, ATTCH_EMAIL_FILE
+                FROM (
+                    SELECT SR_NO, DOC_TYP, DOC_SRL, MOBILE_NO, ATTCH_EMAIL_FILE
+                    FROM S_V_MSG_MOBILE_AUTO
+                    WHERE ATTCH_EMAIL_FILE IS NOT NULL
+                    ORDER BY SR_NO DESC
+                )
+                WHERE ROWNUM <= 10
+            """)
+            v_rows = cur.fetchall()
+            if v_rows:
+                for row in v_rows:
+                    print(f"  - SR#{row[0]} | DOC_TYP={row[1]} | DOC_SRL={row[2]} | جوال={row[3]} | الملف={row[4]}")
+            else:
+                print("  (لا توجد مسارات مسجلة في S_V_MSG_MOBILE_AUTO)")
+        except Exception as v_err:
+            print(f"  [!] تعذر قراءة S_V_MSG_MOBILE_AUTO: {v_err}")
 
         print("\n[+] آخر 10 مرفقات في شاشة التنبيهات (IAS_MSG_SMS_DTL.ATTCH_EMAIL_FILE):")
         cur.execute("""
@@ -727,14 +890,21 @@ def find_onyx_pdf_locations():
                 if qno and len(str(qno).strip()) >= 3:
                     sample_doc_nos.add(str(qno).strip().lower())
 
-            cur.execute("SELECT ATTCH_EMAIL_FILE FROM (SELECT ATTCH_EMAIL_FILE FROM IAS_MSG_SMS_DTL WHERE ATTCH_EMAIL_FILE IS NOT NULL ORDER BY MSG_NO DESC) WHERE ROWNUM <= 20")
-            for (apath,) in cur.fetchall():
-                if apath:
-                    p = str(apath).strip().strip('"')
-                    print(f"  [Oracle ATTCH_EMAIL_FILE] {p}")
-                    parent = os.path.dirname(p)
-                    if parent:
-                        attch_dirs.add(parent)
+            for view_sql in (
+                "SELECT ATTCH_EMAIL_FILE FROM (SELECT ATTCH_EMAIL_FILE FROM S_V_MSG_MOBILE_AUTO WHERE ATTCH_EMAIL_FILE IS NOT NULL ORDER BY SR_NO DESC) WHERE ROWNUM <= 20",
+                "SELECT ATTCH_EMAIL_FILE FROM (SELECT ATTCH_EMAIL_FILE FROM IAS_MSG_SMS_DTL WHERE ATTCH_EMAIL_FILE IS NOT NULL ORDER BY MSG_NO DESC) WHERE ROWNUM <= 20",
+            ):
+                try:
+                    cur.execute(view_sql)
+                    for (apath,) in cur.fetchall():
+                        if apath:
+                            p = str(apath).strip().strip('"')
+                            print(f"  [Oracle ATTCH_EMAIL_FILE] {p}")
+                            parent = os.path.dirname(p)
+                            if parent:
+                                attch_dirs.add(parent)
+                except Exception:
+                    pass
             cur.close()
             conn.close()
         except Exception as err:
@@ -828,6 +998,53 @@ def _auto_detect_default_pdf_dirs() -> str:
     return ";".join(candidates)
 
 
+_ONYX_PDF_NAME_RE = re.compile(r"^pdf(\d{5})(\d{5})(\d{2})(\d{2})(\d{4})(\d{2})(\d{2})(\d{2})$")
+
+_EXPECTED_FORMS_BY_DOC_TYPE = {
+    "cash_invoice": {158},
+    "credit_invoice": {158},
+    "customer_discount_notice": {875},
+    "price_quotation": {155, 158},
+    "receipt_voucher": {23, 21},
+    "account_statement": {274},
+}
+
+
+def _parse_onyx_pdf_stem(stem: str):
+    """تحليل أسماء ملفات أونكس القياسية مثل PDF001580000916112026110215 -> (form_no, u_id, datetime)"""
+    m = _ONYX_PDF_NAME_RE.match(stem)
+    if not m:
+        return None
+    try:
+        form_no = int(m.group(1))
+        uid = int(m.group(2))
+        day, mon, yr = int(m.group(3)), int(m.group(4)), int(m.group(5))
+        hh, mm, ss = int(m.group(6)), int(m.group(7)), int(m.group(8))
+        return (form_no, uid, datetime(yr, mon, day, hh, mm, ss))
+    except ValueError:
+        return None
+
+
+def _is_ready_pdf(file_path: str) -> bool:
+    """التأكد أن ملف الـ PDF مكتمل الكتابة (ليس فارغاً ويبدأ بـ %PDF- وينتهي بـ %%EOF)"""
+    try:
+        size_bytes = os.path.getsize(file_path)
+        if size_bytes < 100 or size_bytes > 10 * 1024 * 1024:
+            return False
+        with open(file_path, "rb") as f:
+            head = f.read(64)
+            if b"%PDF-" not in head:
+                return False
+            if size_bytes > 1024:
+                f.seek(size_bytes - 1024)
+            else:
+                f.seek(0)
+            tail = f.read()
+        return b"%%EOF" in tail
+    except OSError:
+        return False
+
+
 def _build_pdf_index(export_dirs_str: str) -> list:
     """فهرسة سريعة لملفات PDF باستخدام os.scandir() (بعمق أقصى 3 مجلدات، مرتبة من الأحدث للأقدم)"""
     entries = []
@@ -847,7 +1064,8 @@ def _build_pdf_index(export_dirs_str: str) -> list:
                         except OSError:
                             mtime = 0
                         stem = os.path.splitext(entry.name)[0].lower()
-                        entries.append((stem, entry.path, mtime))
+                        parsed_meta = _parse_onyx_pdf_stem(stem)
+                        entries.append((stem, entry.path, mtime, parsed_meta))
         except OSError:
             pass
 
@@ -877,32 +1095,74 @@ def _candidate_doc_tokens(doc_no: str) -> list:
     return tokens
 
 
-def _find_local_onyx_pdf(doc_no: str, attch_path: str, pdf_index: list):
-    """البحث عن ملف PDF الأصلي الصادر من أونكس سواء من ATTCH_EMAIL_FILE أو مجلد التصدير"""
+def _find_local_onyx_pdf(doc: dict, pdf_index: list, used_paths: set = None):
+    """البحث الذكي عن ملف PDF الأصلي من أونكس عبر مسار أوراكل (S_V_MSG_MOBILE_AUTO/ATTCH_EMAIL_FILE) أو توقيت+مستخدم الملف"""
+    if used_paths is None:
+        used_paths = set()
+
+    doc_no = doc.get("invoice_number", "")
+    attch_path = doc.get("_attch_path")
+    doc_type = doc.get("doc_type", "cash_invoice")
+    ad_ts = doc.get("_ad_ts")
+    ad_uid_raw = doc.get("_ad_uid")
+
+    # 1. Exact attachment path from Oracle (S_V_MSG_MOBILE_AUTO.ATTCH_EMAIL_FILE or IAS_MSG_SMS_DTL)
     if attch_path:
         cleaned = str(attch_path).strip().strip('"')
-        if os.path.isfile(cleaned) and cleaned.lower().endswith(".pdf"):
+        if os.path.isfile(cleaned) and cleaned.lower().endswith(".pdf") and _is_ready_pdf(cleaned):
             return cleaned
         base_name = os.path.basename(cleaned).lower()
         if base_name.endswith(".pdf"):
             base_stem = os.path.splitext(base_name)[0]
-            for stem, full_path, _ in pdf_index:
-                if stem == base_stem:
+            for stem, full_path, _, _ in pdf_index:
+                if stem == base_stem and _is_ready_pdf(full_path):
                     return full_path
 
     if not pdf_index:
         return None
 
+    # 2. Correlation via Onyx naming scheme PDF<5d FORM_NO><5d U_ID><DDMMYYYYHHMMSS>.pdf (e.g. D:\DOPDF or D:\MSG\IAS1\PDF\158)
+    if ad_ts and ad_uid_raw is not None and str(ad_uid_raw).strip().isdigit():
+        try:
+            doc_dt = datetime.fromisoformat(str(ad_ts))
+            target_uid = int(str(ad_uid_raw).strip())
+            expected_forms = _EXPECTED_FORMS_BY_DOC_TYPE.get(doc_type, set())
+            best_candidate = None
+            best_score = None
+
+            for _, full_path, _, parsed_meta in pdf_index:
+                if not parsed_meta or full_path in used_paths:
+                    continue
+                form_no, file_uid, pdf_dt = parsed_meta
+                if file_uid != target_uid:
+                    continue
+                if expected_forms and form_no not in expected_forms:
+                    continue
+                delta = (pdf_dt - doc_dt).total_seconds()
+                if -10 <= delta <= 90:
+                    # Prefer PDFs created shortly AFTER document AD_DATE, smallest positive delta first
+                    score = (0 if delta >= 0 else 1, abs(delta))
+                    if best_score is None or score < best_score:
+                        if _is_ready_pdf(full_path):
+                            best_score = score
+                            best_candidate = full_path
+
+            if best_candidate:
+                return best_candidate
+        except ValueError:
+            pass
+
+    # 3. Direct filename token match (if user manually exports named PDFs)
     tokens = _candidate_doc_tokens(doc_no)
     for token in tokens:
-        for stem, full_path, _ in pdf_index:
-            if stem == token:
+        for stem, full_path, _, _ in pdf_index:
+            if stem == token and full_path not in used_paths and _is_ready_pdf(full_path):
                 return full_path
 
     for token in tokens:
         pattern = re.compile(rf"(?<![0-9a-z]){re.escape(token)}(?![0-9a-z])")
-        for stem, full_path, _ in pdf_index:
-            if pattern.search(stem):
+        for stem, full_path, _, _ in pdf_index:
+            if pattern.search(stem) and full_path not in used_paths and _is_ready_pdf(full_path):
                 return full_path
 
     return None
@@ -949,6 +1209,52 @@ def upload_pdf_to_portal(upload_url: str, doc_no: str, pdf_path: str, api_key: s
     return None
 
 
+def _load_auto_msg_pdf_map(cursor):
+    """جلب خريطة مسارات PDF الفعلية من عرض أونكس التلقائي S_V_MSG_MOBILE_AUTO"""
+    by_srl_phone = {}
+    by_srl = {}
+    oracle_now_dt = datetime.now()
+
+    try:
+        cursor.execute("""SELECT TO_CHAR(SYSDATE, 'YYYY-MM-DD"T"HH24:MI:SS') FROM DUAL""")
+        now_row = cursor.fetchone()
+        if now_row and now_row[0]:
+            oracle_now_dt = datetime.fromisoformat(str(now_row[0]).strip())
+    except Exception:
+        pass
+
+    try:
+        cursor.execute(
+            """
+            SELECT TO_CHAR(DOC_SRL), MOBILE_NO, ATTCH_EMAIL_FILE
+            FROM (
+                SELECT DOC_SRL, MOBILE_NO, ATTCH_EMAIL_FILE
+                FROM S_V_MSG_MOBILE_AUTO
+                WHERE ATTCH_EMAIL_FILE IS NOT NULL
+                  AND NVL(AD_DATE, MSG_DATE) >= TRUNC(SYSDATE) - :days_back
+                ORDER BY SR_NO DESC
+            )
+            """,
+            {"days_back": SYNC_DAYS_BACK + 2},
+        )
+        for doc_srl_val, mob_val, attch_val in cursor.fetchall():
+            if not doc_srl_val or not attch_val:
+                continue
+            srl_key = str(doc_srl_val).strip()
+            attch_str = str(attch_val).strip().strip('"')
+            c_phone = clean_phone_number(mob_val)
+            if c_phone and (srl_key, c_phone) not in by_srl_phone:
+                by_srl_phone[(srl_key, c_phone)] = attch_str
+            if srl_key not in by_srl:
+                by_srl[srl_key] = attch_str
+        if by_srl:
+            print(f"  [✓] S_V_MSG_MOBILE_AUTO: تم ربط {len(by_srl)} مسار PDF صادر من أونكس.")
+    except Exception:
+        pass
+
+    return by_srl_phone, by_srl, oracle_now_dt
+
+
 def fetch_documents_from_oracle():
     """الاتصال بقاعدة بيانات أوراكل واسترجاع كافة العمليات من الجداول المفعلة"""
     print(f"[*] جاري الاتصال بقاعدة بيانات أوراكل ({ORACLE_HOST}:{ORACLE_PORT}/{ORACLE_SID})...")
@@ -959,6 +1265,7 @@ def fetch_documents_from_oracle():
     documents = []
     try:
         cursor = conn.cursor()
+        by_srl_phone, by_srl, oracle_now_dt = _load_auto_msg_pdf_map(cursor)
 
         for section_name, cfg in ONYX_QUERIES.items():
             if not cfg.get("enabled"):
@@ -980,6 +1287,23 @@ def fetch_documents_from_oracle():
                             continue
                         valid_count += 1
                         attch_path = str(r[12]).strip() if len(r) > 12 and r[12] is not None else None
+                        doc_srl = str(r[13]).strip() if len(r) > 13 and r[13] is not None else None
+                        ad_ts = str(r[14]).strip() if len(r) > 14 and r[14] is not None else None
+                        ad_uid = str(r[15]).strip() if len(r) > 15 and r[15] is not None else None
+
+                        if not attch_path:
+                            for lookup_key in list(dict.fromkeys([k for k in [doc_srl, doc_no] + _candidate_doc_tokens(doc_no) if k])):
+                                attch_path = by_srl_phone.get((lookup_key, phone)) or by_srl.get(lookup_key)
+                                if attch_path:
+                                    break
+
+                        age_seconds = None
+                        if ad_ts:
+                            try:
+                                age_seconds = (oracle_now_dt - datetime.fromisoformat(ad_ts)).total_seconds()
+                            except ValueError:
+                                age_seconds = None
+
                         documents.append({
                             "invoice_number": doc_no,
                             "doc_type": str(r[1] or "cash_invoice").strip(),
@@ -994,6 +1318,10 @@ def fetch_documents_from_oracle():
                             "onyx_form_code": str(r[10]).strip() if r[10] is not None else None,
                             "details": str(r[11] or "").strip(),
                             "_attch_path": attch_path,
+                            "_doc_srl": doc_srl,
+                            "_ad_ts": ad_ts,
+                            "_ad_uid": ad_uid,
+                            "_age_seconds": age_seconds,
                         })
                     print(f"  [✓] {section_name}: تم سحب {len(rows)} سجل ({valid_count} برقم جوال صالح).")
                     section_succeeded = True
@@ -1138,11 +1466,10 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
         print("[i] لا توجد مستندات جديدة للمزامنة.")
         return 0
 
-    clean_docs = []
-    for doc in docs_list:
-        d = dict(doc)
-        d.pop("_attch_path", None)
-        clean_docs.append(d)
+    clean_docs = [
+        {k: v for k, v in doc.items() if not str(k).startswith("_")}
+        for doc in docs_list
+    ]
 
     headers = {
         "Content-Type": "application/json",
@@ -1171,6 +1498,8 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
                     doc["customer_name"],
                     doc["phone"],
                     doc["amount"],
+                    pdf_uploaded=1 if doc.get("_local_pdf_path") else 0,
+                    pdf_path=doc.get("_local_pdf_path"),
                 )
             return len(docs_list)
         else:
@@ -1219,30 +1548,92 @@ def main():
         if args.mock:
             print("[i] الوضع التجريبي مفعل (--mock): توليد عينات لجميع القوالب الـ 8.")
             all_docs = generate_mock_documents()
+            new_docs = [doc for doc in all_docs if not is_invoice_synced(doc["invoice_number"])]
+            if new_docs:
+                send_documents_to_portal(args.url, new_docs, args.key)
+            else:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] لا توجد عمليات جديدة.")
         else:
             all_docs = fetch_documents_from_oracle()
+            pending_new_docs = []
+            recent_missing_pdf_docs = []
 
-        new_docs = [doc for doc in all_docs if not is_invoice_synced(doc["invoice_number"])]
+            for doc in all_docs:
+                row = get_tracker_row(doc["invoice_number"])
+                if row is None:
+                    pending_new_docs.append(doc)
+                else:
+                    pdf_uploaded = row[0]
+                    age_sec = doc.get("_age_seconds")
+                    if not pdf_uploaded and age_sec is not None and -60 <= age_sec <= 86400:
+                        recent_missing_pdf_docs.append(doc)
 
-        if new_docs:
-            print(f"[+] تم العثور على {len(new_docs)} عملية جديدة لم تُزامن بعد.")
-            # Upload matching local Onyx PDFs (from ATTCH_EMAIL_FILE or ORACLE_PDF_EXPORT_DIR)
-            if not args.mock:
-                has_attch = any(doc.get("_attch_path") for doc in new_docs)
-                if active_pdf_dirs or has_attch:
-                    pdf_index = _build_pdf_index(active_pdf_dirs)
-                    for doc in new_docs:
-                        attch_path = doc.pop("_attch_path", None)
-                        local_pdf = _find_local_onyx_pdf(doc["invoice_number"], attch_path, pdf_index)
-                        if local_pdf:
-                            uploaded_url = upload_pdf_to_portal(
-                                args.upload_pdf_url, doc["invoice_number"], local_pdf, args.key
-                            )
-                            if uploaded_url:
-                                doc["attachment_url"] = uploaded_url
-            send_documents_to_portal(args.url, new_docs, args.key)
-        else:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] لا توجد عمليات جديدة.")
+            need_pdf_index = bool(pending_new_docs or recent_missing_pdf_docs) and (
+                bool(active_pdf_dirs)
+                or any(doc.get("_attch_path") for doc in pending_new_docs + recent_missing_pdf_docs)
+            )
+            pdf_index = _build_pdf_index(active_pdf_dirs) if need_pdf_index else []
+            used_pdf_paths = set()
+
+            ready_docs = []
+            deferred_count = 0
+
+            for doc in pending_new_docs:
+                local_pdf = _find_local_onyx_pdf(doc, pdf_index, used_pdf_paths)
+                if local_pdf:
+                    used_pdf_paths.add(local_pdf)
+                    uploaded_url = upload_pdf_to_portal(
+                        args.upload_pdf_url, doc["invoice_number"], local_pdf, args.key
+                    )
+                    if uploaded_url:
+                        doc["attachment_url"] = uploaded_url
+                        doc["_local_pdf_path"] = local_pdf
+                    ready_docs.append(doc)
+                else:
+                    age_sec = doc.get("_age_seconds")
+                    doc_type = doc.get("doc_type", "cash_invoice")
+                    expects_pdf = doc_type in (
+                        "cash_invoice",
+                        "credit_invoice",
+                        "price_quotation",
+                        "customer_discount_notice",
+                        "account_statement",
+                        "receipt_voucher",
+                    )
+                    if (
+                        args.loop > 0
+                        and PDF_WAIT_SECONDS > 0
+                        and expects_pdf
+                        and age_sec is not None
+                        and -15 <= age_sec < PDF_WAIT_SECONDS
+                    ):
+                        deferred_count += 1
+                        print(
+                            f"  [*] بانتظار تصدير PDF من أونكس لعملية {doc['invoice_number']} "
+                            f"({int(max(0, age_sec))}ث / {PDF_WAIT_SECONDS}ث)..."
+                        )
+                        continue
+                    ready_docs.append(doc)
+
+            if ready_docs:
+                print(f"[+] تم العثور على {len(ready_docs)} عملية جديدة للمزامنة.")
+                send_documents_to_portal(args.url, ready_docs, args.key)
+            elif deferred_count == 0:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] لا توجد عمليات جديدة.")
+
+            late_uploaded = 0
+            for doc in recent_missing_pdf_docs:
+                if late_uploaded >= 5:
+                    break
+                local_pdf = _find_local_onyx_pdf(doc, pdf_index, used_pdf_paths)
+                if local_pdf:
+                    used_pdf_paths.add(local_pdf)
+                    uploaded_url = upload_pdf_to_portal(
+                        args.upload_pdf_url, doc["invoice_number"], local_pdf, args.key
+                    )
+                    if uploaded_url:
+                        mark_pdf_as_uploaded(doc["invoice_number"], local_pdf)
+                        late_uploaded += 1
 
         if args.loop <= 0:
             break

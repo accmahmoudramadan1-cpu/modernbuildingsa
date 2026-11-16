@@ -88,6 +88,12 @@ export async function POST(request: NextRequest) {
       process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com";
     const publicUrl = `${publicBaseUrl}/api/oracle-orders/pdf/${encodeURIComponent(invoiceNumber)}`;
 
+    // Sync attachment_url onto existing oracle_invoices row if it already exists
+    await executeSql(
+      `UPDATE oracle_invoices SET attachment_url = ?, updated_at = NOW(3) WHERE invoice_number = ?`,
+      [publicUrl, invoiceNumber]
+    ).catch((err) => console.warn("[Upload PDF] Invoice attachment_url sync warning:", err));
+
     return NextResponse.json({
       success: true,
       url: publicUrl,
