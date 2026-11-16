@@ -1336,10 +1336,32 @@ def fetch_documents_from_oracle():
                         ad_uid = str(r[15]).strip() if len(r) > 15 and r[15] is not None else None
 
                         if not attch_path:
-                            for lookup_key in list(dict.fromkeys([k for k in [doc_srl, doc_no] + _candidate_doc_tokens(doc_no) if k])):
+                            cand_keys = list(dict.fromkeys([k for k in [doc_srl, doc_no] + _candidate_doc_tokens(doc_no) if k]))
+                            for lookup_key in cand_keys:
                                 attch_path = by_srl_phone.get((lookup_key, phone)) or by_srl.get(lookup_key)
                                 if attch_path:
                                     break
+                            if not attch_path:
+                                # Oracle S_V_MSG_MOBILE_AUTO.DOC_SRL wraps BILL_NO/QUOT_NO as suffix (e.g. 202600000110412601020005)
+                                for lookup_key in cand_keys:
+                                    if len(lookup_key) < 3:
+                                        continue
+                                    for (srl_k, srl_p), path_v in by_srl_phone.items():
+                                        if srl_p == phone and srl_k.endswith(lookup_key):
+                                            attch_path = path_v
+                                            break
+                                    if attch_path:
+                                        break
+                            if not attch_path:
+                                for lookup_key in cand_keys:
+                                    if len(lookup_key) < 6:
+                                        continue
+                                    for srl_k, path_v in by_srl.items():
+                                        if srl_k.endswith(lookup_key):
+                                            attch_path = path_v
+                                            break
+                                    if attch_path:
+                                        break
 
                         age_seconds = None
                         if ad_ts:
