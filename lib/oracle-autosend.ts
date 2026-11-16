@@ -69,11 +69,6 @@ export async function autoDispatchOracleInvoice(doc: AutoSendCandidate): Promise
     }
   }
 
-  // Wait for authentic Onyx PDF rather than sending without attachment or using placeholder PDFs
-  if (requiresOnyxPdf && !resolvedPdfUrl) {
-    return { outcome: "waiting_pdf" };
-  }
-
   const languageCode = process.env.WHATSAPP_INVOICE_TEMPLATE_LANG || "ar";
   const normalizedDoc = { ...doc, doc_type: templateDef.id };
   const bodyParameters = extractTemplateParameters(templateDef.id, normalizedDoc);
@@ -89,15 +84,24 @@ export async function autoDispatchOracleInvoice(doc: AutoSendCandidate): Promise
     previewText: formatTemplatePreviewText(templateDef.id, bodyParameters),
   });
 
-  await updateInvoiceWhatsAppStatus({
-    invoiceNumber: doc.invoice_number,
-    status: sendRes.success ? "sent" : "failed",
-    messageId: sendRes.messageId,
-  });
-
   if (sendRes.success) {
+    await updateInvoiceWhatsAppStatus({
+      invoiceNumber: doc.invoice_number,
+      status: "sent",
+      messageId: sendRes.messageId,
+    });
     return { outcome: "sent", messageId: sendRes.messageId };
   }
+
+  // If Meta requires a PDF Header that isn't exported yet, keep pending so upload-pdf dispatches once ready
+  if (!resolvedPdfUrl && (sendRes as any).missingMandatoryPdfHeader) {
+    return { outcome: "waiting_pdf" };
+  }
+
+  await updateInvoiceWhatsAppStatus({
+    invoiceNumber: doc.invoice_number,
+    status: "failed",
+  });
 
   return {
     outcome: "failed",

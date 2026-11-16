@@ -597,6 +597,21 @@ export async function getConversationDetail(rawPhone: string): Promise<{
   return { conversation, messages, relatedInvoices };
 }
 
+export async function isConversationWindowOpen(rawPhone: string): Promise<boolean> {
+  const normPhone = formatPhoneNumber(rawPhone);
+  if (!normPhone || !isMysqlConfigured()) return false;
+  try {
+    const rows = await queryRows<any>(
+      `SELECT last_inbound_at FROM whatsapp_conversations WHERE phone = ? LIMIT 1`,
+      [normPhone]
+    );
+    if (!rows.length) return false;
+    return computeWindowState(rows[0].last_inbound_at).is_window_open;
+  } catch {
+    return false;
+  }
+}
+
 export async function deleteConversation(rawPhone: string): Promise<void> {
   const normPhone = formatPhoneNumber(rawPhone);
   if (!normPhone || !isMysqlConfigured()) return;

@@ -442,8 +442,8 @@ export default function WhatsAppInboxTemplateModal({
                     ✓ تم جلب رابط PDF تلقائياً — معاينة ↗
                   </a>
                 ) : (
-                  <span className="text-[11px] font-bold text-slate-400">
-                    لم يُرفع ملف PDF أصلي من أونكس لهذا الرقم بعد
+                  <span className="text-[11px] font-bold text-slate-500">
+                    لا يوجد ملف PDF مرفوع بعد — سيتم الإرسال بدون PDF
                   </span>
                 )}
               </div>

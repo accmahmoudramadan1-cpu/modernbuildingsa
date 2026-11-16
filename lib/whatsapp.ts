@@ -2,7 +2,10 @@
  * Helper utility for Meta WhatsApp Cloud API
  */
 import { formatPhoneNumber } from "@/lib/whatsapp-phone";
-import { recordWhatsAppMessage } from "@/lib/whatsapp-inbox";
+import {
+  isConversationWindowOpen,
+  recordWhatsAppMessage,
+} from "@/lib/whatsapp-inbox";
 
 export { formatPhoneNumber };
 
@@ -282,10 +285,28 @@ export async function sendWhatsAppTemplate({
       usedUrl = undefined;
       attempt = await postTemplate(buildComponents(undefined));
     } else if (!attempt.ok && !cleanHeaderUrl && isTemplateHeaderMismatchError(attempt.data)) {
+      // Meta template has a mandatory Document Header, so Meta won't allow template dispatch without PDF.
+      // If customer has an open 24h window, send the exact message text directly without any PDF.
+      const windowOpen = await isConversationWindowOpen(recipient);
+      const fallbackText =
+        previewText ||
+        (bodyParameters.length > 0 ? `[${templateName}] ${bodyParameters.join(" | ")}` : "");
+      if (windowOpen && fallbackText) {
+        const directRes = await sendWhatsAppMessage(recipient, fallbackText, { customerName });
+        if (directRes.success) {
+          return {
+            success: true,
+            messageId: directRes.messageId,
+            recorded: directRes.recorded,
+            data: directRes.data,
+          };
+        }
+      }
+
       return {
         success: false,
-        error:
-          "يتطلب هذا القالب في Meta إرفاق ملف PDF الأصلي الصادر من أونكس، ولم يتم تصدير أو رفع ملف PDF لهذا المستند بعد.",
+        missingMandatoryPdfHeader: true,
+        error: `تعذر إرسال القالب بدون PDF لأن قالب (${templateName}) في Meta مضبوط بهيدر ملف PDF إلزامي؛ قم بإزالة هيدر الـ PDF من القالب في Meta أو انتظر تصدير الـ PDF من أونكس (أو راسل العميل بعد فتح نافذة الـ 24 ساعة).`,
         details: attempt.data,
       };
     }

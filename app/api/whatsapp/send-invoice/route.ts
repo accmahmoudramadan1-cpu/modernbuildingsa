@@ -133,21 +133,6 @@ export async function POST(request: NextRequest) {
         customerName: effectiveCustomerName,
       });
     } else {
-      if (
-        sendMode === "template" &&
-        templateDef.hasAttachment &&
-        resolvedDocType !== "direct_alert" &&
-        !effectiveHeaderUrl
-      ) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `لا يمكن إرسال (${templateDef.label}) للمستند رقم (${invoiceNumber}) لأن ملف الـ PDF الأصلي الصادر من أونكس لم يُرفع بعد.`,
-          },
-          { status: 400 }
-        );
-      }
-
       result = await sendWhatsAppTemplate({
         to: phone,
         templateName: resolvedTemplateName,
@@ -173,13 +158,20 @@ export async function POST(request: NextRequest) {
         recipient: formatPhoneNumber(phone),
         docType: resolvedDocType,
         sendMode,
-        message: `تم إرسال (${templateDef.label}) عبر واتساب بنجاح.`,
+        message: effectiveHeaderUrl
+          ? `تم إرسال (${templateDef.label}) مع ملف PDF أونكس بنجاح.`
+          : `تم إرسال (${templateDef.label}) بدون ملف PDF بنجاح.`,
       });
     } else {
-      await updateInvoiceWhatsAppStatus({
-        invoiceNumber,
-        status: "failed",
-      });
+      if (
+        !(result as any).missingMandatoryPdfHeader &&
+        authoritativeInvoice?.status !== "sent"
+      ) {
+        await updateInvoiceWhatsAppStatus({
+          invoiceNumber,
+          status: "failed",
+        });
+      }
 
       const errorMessage =
         typeof result.error === "string"
