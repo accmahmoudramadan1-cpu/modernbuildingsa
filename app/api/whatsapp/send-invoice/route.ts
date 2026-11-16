@@ -11,6 +11,8 @@ import {
   getOnyxTemplate,
   type OnyxDocType,
 } from "@/lib/onyx-templates";
+import { getWhatsAppSession } from "@/lib/whatsapp-auth";
+import { getAdminSession } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +22,17 @@ export const dynamic = "force-dynamic";
  * using any of the 8 Onyx Pro ERP document templates.
  */
 export async function POST(request: NextRequest) {
+  const [waSession, adminSession] = await Promise.all([
+    getWhatsAppSession(),
+    getAdminSession(),
+  ]);
+  if (!waSession && !adminSession) {
+    return NextResponse.json(
+      { success: false, error: "غير مصرح: يرجى تسجيل الدخول أولاً." },
+      { status: 401 }
+    );
+  }
+
   try {
     const body = await request.json();
 
@@ -79,7 +92,9 @@ export async function POST(request: NextRequest) {
       if (headerUrl && String(headerUrl).trim()) {
         fullText += `\n\nرابط المرفق:\n${String(headerUrl).trim()}`;
       }
-      result = await sendWhatsAppMessage(phone, fullText);
+      result = await sendWhatsAppMessage(phone, fullText, {
+        customerName: customerName || undefined,
+      });
     } else {
       const publicBaseUrl =
         process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com";
@@ -95,6 +110,8 @@ export async function POST(request: NextRequest) {
         headerUrl: headerUrl ? String(headerUrl).trim() : undefined,
         fallbackPdfUrl,
         documentFilename: `ModernBuilding_${String(invoiceNumber).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`,
+        customerName: customerName || undefined,
+        previewText: formatTemplatePreviewText(resolvedDocType, bodyParameters),
       });
     }
 

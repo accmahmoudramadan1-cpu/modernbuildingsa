@@ -1,0 +1,28 @@
+{
+  "id": "/whatsapp/inbox",
+  "name": "Modern Building",
+  "short_name": "Modern Building",
+  "description": "صندوق وارد وإشعارات واتساب مؤسسة البناء الحديث للتجارة",
+  "start_url": "/whatsapp/inbox",
+  "scope": "/whatsapp",
+  "display": "standalone",
+  "orientation": "any",
+  "dir": "rtl",
+  "lang": "ar",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

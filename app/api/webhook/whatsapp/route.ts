@@ -1,10 +1,43 @@
+import crypto from "crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { downloadMetaMedia } from "@/lib/whatsapp";
+import {
+  recordWhatsAppMessage,
+  saveMediaToMysql,
+  updateWhatsAppMessageStatus,
+} from "@/lib/whatsapp-inbox";
 
 export const dynamic = "force-dynamic";
 
+function verifyMetaSignature(rawBody: string, signatureHeader: string | null): boolean {
+  const appSecret = process.env.META_APP_SECRET || process.env.WHATSAPP_APP_SECRET;
+  if (!appSecret) return true; // Skip strict HMAC only if secret is not configured
+  if (!signatureHeader || !signatureHeader.startsWith("sha256=")) return false;
+
+  const expected = crypto
+    .createHmac("sha256", appSecret)
+    .update(rawBody, "utf8")
+    .digest("hex");
+  const received = signatureHeader.slice("sha256=".length);
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(received, "utf8");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function extensionFromMime(mimeType: string): string {
+  const m = mimeType.toLowerCase();
+  if (m.includes("jpeg") || m.includes("jpg")) return "jpg";
+  if (m.includes("png")) return "png";
+  if (m.includes("webp")) return "webp";
+  if (m.includes("ogg")) return "ogg";
+  if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
+  if (m.includes("mp4")) return "mp4";
+  if (m.includes("pdf")) return "pdf";
+  return "bin";
+}
+
 /**
  * GET Handler - Webhook Verification for Meta WhatsApp Cloud API
- * Meta sends a GET request with hub.mode, hub.verify_token, and hub.challenge
  */
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -15,21 +48,13 @@ export async function GET(request: NextRequest) {
   const verifyToken =
     process.env.WHATSAPP_VERIFY_TOKEN || "modern_building_verify_2026";
 
-  // Check the mode and verify token
   if (mode === "subscribe" && token === verifyToken) {
     console.log("[WhatsApp Webhook] Verification successful!");
-    // Meta requires returning the challenge directly as plain text with 200 OK
     return new Response(challenge || "", {
       status: 200,
       headers: { "Content-Type": "text/plain" },
     });
   }
-
-  console.warn("[WhatsApp Webhook] Verification failed. Tokens did not match or invalid mode.", {
-    receivedToken: token,
-    expectedToken: verifyToken,
-    mode,
-  });
 
   return new Response("Forbidden: Invalid verification token", {
     status: 403,
@@ -37,69 +62,143 @@ export async function GET(request: NextRequest) {
 }
 
 /**
- * POST Handler - Receives incoming WhatsApp messages & status notifications from Meta
+ * POST Handler - Receives incoming WhatsApp messages, media, and delivery/read status updates
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
+    const rawBody = await request.text();
+    if (!verifyMetaSignature(rawBody, request.headers.get("x-hub-signature-256"))) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
 
-    // Log incoming payload for debugging in Vercel logs
-    console.log("[WhatsApp Webhook] Received event:", JSON.stringify(body, null, 2));
+    const body = JSON.parse(rawBody);
+    if (body.object !== "whatsapp_business_account") {
+      return NextResponse.json({ error: "Not a valid WhatsApp event" }, { status: 404 });
+    }
 
-    if (body.object === "whatsapp_business_account") {
-      const entries = body.entry || [];
+    const entries = body.entry || [];
+    for (const entry of entries) {
+      const changes = entry.changes || [];
+      for (const change of changes) {
+        const value = change.value;
+        if (!value) continue;
 
-      for (const entry of entries) {
-        const changes = entry.changes || [];
-
-        for (const change of changes) {
-          const value = change.value;
-
-          if (!value) continue;
-
-          // 1. Process Incoming Messages
-          if (value.messages && Array.isArray(value.messages)) {
-            for (const message of value.messages) {
-              const from = message.from; // Customer's phone number
-              const messageId = message.id;
-              const timestamp = message.timestamp;
-              const type = message.type;
-              const text = message.text?.body;
-
-              console.log(
-                `[WhatsApp Webhook] Message from ${from} (${type}):`,
-                text || `[${type} payload]`
-              );
-
-              // Future extension: You can trigger auto-replies or save to Supabase here
-            }
-          }
-
-          // 2. Process Message Statuses (sent, delivered, read, failed)
-          if (value.statuses && Array.isArray(value.statuses)) {
-            for (const status of value.statuses) {
-              console.log(
-                `[WhatsApp Webhook] Status update for message ${status.id}: ${status.status} (recipient: ${status.recipient_id})`
-              );
+        // Build wa_id -> profile.name lookup
+        const contactNames = new Map<string, string>();
+        if (Array.isArray(value.contacts)) {
+          for (const c of value.contacts) {
+            if (c?.wa_id && c?.profile?.name) {
+              contactNames.set(String(c.wa_id).replace(/\D/g, ""), String(c.profile.name));
             }
           }
         }
-      }
 
-      // Always acknowledge receipt promptly with a 200 OK so Meta doesn't retry
-      return NextResponse.json({ status: "EVENT_RECEIVED" }, { status: 200 });
+        // 1. Process Inbound Messages (and store media permanently in MySQL media_files)
+        if (Array.isArray(value.messages)) {
+          for (const message of value.messages) {
+            const from = String(message.from || "").replace(/\D/g, "");
+            if (!from) continue;
+
+            const waMessageId = message.id ? String(message.id) : null;
+            const timestampMs = message.timestamp ? Number(message.timestamp) * 1000 : Date.now();
+            const createdAt = new Date(Number.isFinite(timestampMs) ? timestampMs : Date.now());
+            const type = String(message.type || "text");
+            const customerName = contactNames.get(from) || null;
+            const replyToWaId = message.context?.id ? String(message.context.id) : null;
+
+            let textBody: string | null = null;
+            let mediaId: string | null = null;
+            let mediaUrl: string | null = null;
+            let mediaMime: string | null = null;
+            let mediaFilename: string | null = null;
+
+            if (type === "text") {
+              textBody = message.text?.body ? String(message.text.body) : "";
+            } else if (type === "button") {
+              textBody = message.button?.text ? String(message.button.text) : "رد زر سريع";
+            } else if (type === "interactive") {
+              textBody =
+                message.interactive?.button_reply?.title ||
+                message.interactive?.list_reply?.title ||
+                "رد تفاعلي";
+            } else if (type === "reaction") {
+              textBody = `تفاعل: ${message.reaction?.emoji || "👍"}`;
+            } else if (type === "location" && message.location) {
+              const lat = message.location.latitude;
+              const lng = message.location.longitude;
+              const locName = message.location.name || message.location.address || "";
+              textBody = `موقع: ${locName ? locName + " - " : ""}https://maps.google.com/?q=${lat},${lng}`;
+            } else if (type === "contacts") {
+              const firstContact = message.contacts?.[0];
+              textBody = `جهة اتصال: ${firstContact?.name?.formatted_name || "غير مسمى"}`;
+            } else if (
+              type === "image" ||
+              type === "audio" ||
+              type === "video" ||
+              type === "document" ||
+              type === "sticker"
+            ) {
+              const mediaNode = message[type] || {};
+              mediaId = mediaNode.id ? String(mediaNode.id) : null;
+              mediaMime = mediaNode.mime_type ? String(mediaNode.mime_type) : null;
+              mediaFilename = mediaNode.filename ? String(mediaNode.filename) : null;
+              textBody = mediaNode.caption ? String(mediaNode.caption) : null;
+
+              if (mediaId) {
+                const downloaded = await downloadMetaMedia(mediaId);
+                if (downloaded && downloaded.buffer.length <= 20 * 1024 * 1024) {
+                  const ext = extensionFromMime(downloaded.mimeType);
+                  const savedId = await saveMediaToMysql({
+                    buffer: downloaded.buffer,
+                    mimeType: downloaded.mimeType,
+                    filename: mediaFilename || `${type}_${mediaId}.${ext}`,
+                  });
+                  if (savedId) {
+                    mediaUrl = `/api/media/${savedId}`;
+                    mediaMime = downloaded.mimeType;
+                  }
+                }
+              }
+            }
+
+            await recordWhatsAppMessage({
+              phone: from,
+              customerName,
+              waMessageId,
+              direction: "in",
+              msgType: type,
+              body: textBody,
+              mediaId,
+              mediaUrl,
+              mediaMime,
+              mediaFilename,
+              replyToWaId,
+              status: "read",
+              createdAt,
+            });
+          }
+        }
+
+        // 2. Process Message Status Updates (SENT, DELIVERED, READ/SEEN, FAILED)
+        if (Array.isArray(value.statuses)) {
+          for (const st of value.statuses) {
+            if (!st?.id || !st?.status) continue;
+            const errMsg = st.errors?.[0]
+              ? String(st.errors[0].error_data?.details || st.errors[0].message || st.errors[0].title || "")
+              : null;
+            await updateWhatsAppMessageStatus({
+              waMessageId: String(st.id),
+              status: String(st.status),
+              errorText: errMsg,
+            });
+          }
+        }
+      }
     }
 
-    return NextResponse.json(
-      { error: "Not a valid WhatsApp event" },
-      { status: 404 }
-    );
+    return NextResponse.json({ status: "EVENT_RECEIVED" }, { status: 200 });
   } catch (error) {
     console.error("[WhatsApp Webhook] Error processing event:", error);
-    // Return 200 or 500. Meta recommends returning 200 once received to avoid constant retries on parse errors.
-    return NextResponse.json(
-      { error: "Internal Server Error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ status: "EVENT_RECEIVED_WITH_WARN" }, { status: 200 });
   }
 }

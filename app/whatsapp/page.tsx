@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import WhatsAppLoginForm from "@/components/WhatsAppLoginForm";
+import WhatsAppInstallBanner from "@/components/WhatsAppInstallBanner";
 import {
   WhatsAppIcon,
   RefreshIcon,
@@ -50,6 +52,10 @@ interface OracleInvoice {
 }
 
 export default function WhatsAppInvoicesPage() {
+  const [authStatus, setAuthStatus] = useState<"checking" | "authenticated" | "unauthenticated">("checking");
+  const [authUser, setAuthUser] = useState<string>("");
+  const [showInstallPopup, setShowInstallPopup] = useState(false);
+
   const [invoices, setInvoices] = useState<OracleInvoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -77,6 +83,11 @@ export default function WhatsAppInvoicesPage() {
     setActionMessage(null);
     try {
       const res = await fetch("/api/oracle-orders", { cache: "no-store" });
+      if (res.status === 401) {
+        setAuthStatus("unauthenticated");
+        setLoading(false);
+        return;
+      }
       const data = await res.json();
       if (data.success && Array.isArray(data.invoices)) {
         setInvoices(data.invoices);
@@ -96,8 +107,38 @@ export default function WhatsAppInvoicesPage() {
     }
   }
 
+  async function handleLogout() {
+    await fetch("/api/whatsapp/auth", { method: "DELETE" }).catch(() => {});
+    setAuthUser("");
+    setInvoices([]);
+    setSelectedInvoice(null);
+    setAuthStatus("unauthenticated");
+  }
+
   useEffect(() => {
-    loadInvoices();
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/whatsapp/auth", { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (!active) return;
+        if (res.ok && data.authenticated) {
+          setAuthUser(data.username || "modernbuilding");
+          setAuthStatus("authenticated");
+          loadInvoices();
+        } else {
+          setAuthStatus("unauthenticated");
+          setLoading(false);
+        }
+      } catch {
+        if (!active) return;
+        setAuthStatus("unauthenticated");
+        setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, []);
 
   // Open Template Send Modal for a record
@@ -158,6 +199,12 @@ export default function WhatsAppInvoicesPage() {
           headerUrl: headerUrl.trim() || undefined,
         }),
       });
+
+      if (res.status === 401) {
+        setAuthStatus("unauthenticated");
+        setSending(false);
+        return;
+      }
 
       const result = await res.json();
 
@@ -223,8 +270,35 @@ export default function WhatsAppInvoicesPage() {
   const activeTemplateDef = getOnyxTemplate(activeDocType);
   const livePreviewText = formatTemplatePreviewText(activeDocType, parameters);
 
+  if (authStatus === "checking") {
+    return (
+      <main dir="rtl" className="flex min-h-screen items-center justify-center bg-[#f4f7f6] px-4">
+        <div className="flex flex-col items-center gap-3 rounded-3xl bg-white p-8 shadow-lg border border-black/5">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-emerald-600 border-t-transparent" />
+          <p className="text-sm font-bold text-gray-600">جاري التحقق من جلسة الدخول...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (authStatus === "unauthenticated") {
+    return (
+      <WhatsAppLoginForm
+        onSuccess={(u) => {
+          setAuthUser(u);
+          setAuthStatus("authenticated");
+          loadInvoices();
+        }}
+      />
+    );
+  }
+
   return (
     <main dir="rtl" className="min-h-screen bg-[#f5f5f3] px-4 py-8 sm:px-6 lg:px-10">
+      <WhatsAppInstallBanner
+        forceOpen={showInstallPopup}
+        onClose={() => setShowInstallPopup(false)}
+      />
       <div className="mx-auto max-w-7xl">
         {/* Navigation & Header */}
         <div className="flex flex-col gap-4 border-b border-black/10 pb-6 md:flex-row md:items-center md:justify-between">
@@ -250,6 +324,25 @@ export default function WhatsAppInvoicesPage() {
               <span>الإرسال التلقائي من أونكس: مفعّل</span>
             </span>
 
+            <Link
+              href="/whatsapp/inbox"
+              className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:bg-emerald-700"
+            >
+              <WhatsAppIcon className="h-4 w-4 fill-current" />
+              <span>صندوق الوارد والمحادثات</span>
+            </Link>
+
+            <button
+              type="button"
+              onClick={() => setShowInstallPopup(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-bold text-emerald-800 shadow-xs transition hover:bg-emerald-50"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4 fill-none stroke-current" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+              </svg>
+              <span>تثبيت التطبيق</span>
+            </button>
+
             <button
               onClick={loadInvoices}
               disabled={loading}
@@ -257,6 +350,15 @@ export default function WhatsAppInvoicesPage() {
             >
               <RefreshIcon className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               <span>{loading ? "جاري التحديث..." : "تحديث البيانات"}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              title={`تسجيل الخروج (${authUser || "modernbuilding"})`}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-black text-red-700 transition hover:bg-red-100"
+            >
+              <span>خروج</span>
             </button>
           </div>
         </div>

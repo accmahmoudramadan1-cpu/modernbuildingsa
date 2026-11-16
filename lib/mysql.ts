@@ -154,6 +154,44 @@ export async function ensureMysqlSchema(): Promise<void> {
           created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS whatsapp_conversations (
+          phone VARCHAR(50) PRIMARY KEY,
+          customer_name VARCHAR(255) NULL,
+          last_message_text TEXT NULL,
+          last_message_type VARCHAR(30) DEFAULT 'text',
+          last_message_direction VARCHAR(10) DEFAULT 'out',
+          last_message_status VARCHAR(20) DEFAULT 'sent',
+          last_message_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+          last_inbound_at DATETIME(3) NULL,
+          unread_count INT NOT NULL DEFAULT 0,
+          created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+          updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+          INDEX idx_wconv_last_at (last_message_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS whatsapp_messages (
+          id CHAR(36) PRIMARY KEY,
+          phone VARCHAR(50) NOT NULL,
+          wa_message_id VARCHAR(255) NULL UNIQUE,
+          direction VARCHAR(10) NOT NULL,
+          msg_type VARCHAR(30) NOT NULL DEFAULT 'text',
+          body TEXT NULL,
+          media_id VARCHAR(255) NULL,
+          media_url TEXT NULL,
+          media_mime VARCHAR(120) NULL,
+          media_filename VARCHAR(255) NULL,
+          reply_to_wa_id VARCHAR(255) NULL,
+          reply_preview TEXT NULL,
+          template_name VARCHAR(120) NULL,
+          status VARCHAR(20) NOT NULL DEFAULT 'sent',
+          error_text TEXT NULL,
+          created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+          updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
+          INDEX idx_wm_phone_time (phone, created_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
     })().catch((err) => {
       globalThis.__mbMysqlSchemaReady = undefined;
       throw err;

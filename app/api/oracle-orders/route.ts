@@ -5,7 +5,9 @@ import {
   updateInvoiceWhatsAppStatus,
 } from "@/lib/oracle-invoices";
 import { sendWhatsAppTemplate, formatPhoneNumber } from "@/lib/whatsapp";
-import { extractTemplateParameters, getOnyxTemplate } from "@/lib/onyx-templates";
+import { extractTemplateParameters, formatTemplatePreviewText, getOnyxTemplate } from "@/lib/onyx-templates";
+import { getWhatsAppSession } from "@/lib/whatsapp-auth";
+import { getAdminSession } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,17 @@ function isWithinRecentDays(dateStr: string | undefined | null, maxDays: number)
  * Fetches all invoices imported from Oracle (OraNT)
  */
 export async function GET() {
+  const [waSession, adminSession] = await Promise.all([
+    getWhatsAppSession(),
+    getAdminSession(),
+  ]);
+  if (!waSession && !adminSession) {
+    return NextResponse.json(
+      { success: false, error: "يرجى تسجيل الدخول للوصول إلى بوابة الواتساب." },
+      { status: 401 }
+    );
+  }
+
   try {
     const invoices = await getOracleInvoices();
     return NextResponse.json({
@@ -127,6 +140,8 @@ export async function POST(request: NextRequest) {
             headerUrl: doc.attachment_url || undefined,
             fallbackPdfUrl,
             documentFilename: `ModernBuilding_${doc.invoice_number.replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`,
+            customerName: doc.customer_name,
+            previewText: formatTemplatePreviewText(templateDef.id, bodyParameters),
           });
 
           await updateInvoiceWhatsAppStatus({
