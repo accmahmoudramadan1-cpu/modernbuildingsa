@@ -2,27 +2,6 @@ import NextImage from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-server";
 import { STORE_CATEGORIES } from "@/lib/categories-data";
-import ProductSearch from "@/components/ProductSearch";
-
-type Category = {
-  id: string;
-  name: string;
-  description: string | null;
-  image_url: string | null;
-  icon?: string;
-};
-
-type Product = {
-  id: string;
-  category_id: string | null;
-  name: string;
-  image_url: string | null;
-  description: string | null;
-  price: number | null;
-  currency: string | null;
-  show_price: boolean;
-  available: boolean;
-};
 
 type SiteSettings = {
   company_name: string | null;
@@ -41,18 +20,11 @@ type SiteSettings = {
 export default async function Home() {
   const supabase = await createClient();
 
-  const [{ data: categories }, { data: products }, { data: siteSettings }] =
+  const [{ data: categories }, { data: siteSettings }] =
     await Promise.all([
       supabase
         .from("categories")
         .select("id, name, description, image_url")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("products")
-        .select(
-          "id, category_id, name, image_url, description, price, currency, show_price, available"
-        )
-        .eq("available", true)
         .order("created_at", { ascending: false }),
       supabase
         .from("site_settings")
@@ -71,19 +43,22 @@ export default async function Home() {
       return n1 === n2 || n1.includes(n2) || n2.includes(n1);
     });
 
+    const useCuratedThumbnail =
+      storeCat.slug === "plumbing" || storeCat.slug === "building";
+
     return {
       id: matchedDb ? matchedDb.id : storeCat.id,
       slug: storeCat.slug,
       name: storeCat.name,
       description: storeCat.description,
-      image_url: matchedDb?.image_url || storeCat.thumbnail,
+      image_url: useCuratedThumbnail
+        ? storeCat.thumbnail
+        : matchedDb?.image_url || storeCat.thumbnail,
       thumbnail: storeCat.thumbnail,
       icon: storeCat.icon,
       images_count: storeCat.images_count,
     };
   });
-
-  const safeProducts: Product[] = products || [];
 
   const settings: SiteSettings = {
     company_name: siteSettings?.company_name
@@ -149,9 +124,6 @@ export default async function Home() {
             <a href="#location" className="transition hover:text-[#123B5D]">
               موقعنا
             </a>
-            <a href="#products" className="transition hover:text-[#123B5D]">
-              المنتجات
-            </a>
             <a href="#about" className="transition hover:text-[#123B5D]">
               من نحن
             </a>
@@ -213,19 +185,10 @@ export default async function Home() {
           <div className="grid items-center gap-8 lg:gap-12 lg:grid-cols-12">
             {/* Text column (7 cols) */}
             <div className="lg:col-span-7 flex flex-col items-start w-full">
-              {/* Interactive badge linked to products */}
-              <a
-                href="#products"
-                className="mb-4 inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 hover:bg-blue-500/20 px-4 py-1.5 text-xs sm:text-sm font-bold text-blue-300 backdrop-blur-md transition group"
-              >
-                <span>🏗️ لمواد البناء والتشطيب</span>
-                <span className="text-white/80 group-hover:translate-x-[-3px] transition-transform">← اضغط هنا</span>
-              </a>
-
               <h2 className="text-3xl sm:text-5xl lg:text-6xl font-black leading-tight text-white break-words w-full">
-                كل ما تحتاجه <br />
+                لبناء أفضل <br />
                 <span className="text-[#3b82f6]">
-                  لبناء أفضل في مكان واحد
+                  كل ما تحتاجه في مكان واحد
                 </span>
               </h2>
 
@@ -237,10 +200,10 @@ export default async function Home() {
               {/* 4 Hero Action Buttons */}
               <div className="mt-6 sm:mt-8 flex flex-wrap items-center gap-2.5 sm:gap-3 w-full">
                 <a
-                  href="#products"
+                  href="#categories"
                   className="rounded-xl bg-[#123B5D] px-5 sm:px-7 py-3 text-center text-xs sm:text-sm font-bold text-white shadow-md transition hover:bg-[#0B2942] whitespace-nowrap"
                 >
-                  🛍️ تصفح المنتجات
+                  🛍️ تصفح الأقسام
                 </a>
                 <a
                   href={settings.whatsapp_business || whatsappLink}
@@ -419,18 +382,18 @@ export default async function Home() {
             {/* Store Info Card (5 cols on lg) */}
             <div className="lg:col-span-5 flex flex-col justify-between rounded-3xl bg-white p-6 sm:p-8 shadow-sm border border-gray-200/90">
               <div>
-                <div className="flex items-center gap-3 border-b border-gray-100 pb-4">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#123B5D] text-white text-2xl shadow-xs">
-                    🏬
+                <div className="flex flex-col items-start gap-2 border-b border-gray-100 pb-4">
+                  <div className="relative h-12 sm:h-14 w-48 sm:w-56">
+                    <NextImage
+                      src="/logo.png"
+                      alt={settings.company_name || "Modern Building"}
+                      fill
+                      className="object-contain object-right"
+                    />
                   </div>
-                  <div>
-                    <h3 className="text-base sm:text-lg font-black text-gray-900">
-                      مؤسسة معرض البناء الحديث للتجارة
-                    </h3>
-                    <p className="text-xs text-gray-500 font-medium">
-                      Modern Building — نجران
-                    </p>
-                  </div>
+                  <p className="text-xs text-gray-500 font-medium">
+                    Modern Building — نجران
+                  </p>
                 </div>
 
                 <div className="mt-5 space-y-3.5 text-xs sm:text-sm text-gray-700">
@@ -555,33 +518,6 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* Products Section */}
-      <section
-        id="products"
-        className="bg-white px-4 sm:px-6 lg:px-8 py-12 sm:py-20 border-y border-gray-200/80 w-full"
-      >
-        <div className="mx-auto max-w-7xl">
-          <div className="flex flex-col justify-between gap-3 sm:gap-4 md:flex-row md:items-end">
-            <div>
-              <span className="text-xs sm:text-sm font-bold text-[#123B5D]">
-                منتجاتنا
-              </span>
-              <h2 className="mt-1 sm:mt-3 text-2xl sm:text-4xl font-black">
-                منتجات مميزة
-              </h2>
-              <p className="mt-2 sm:mt-4 max-w-2xl text-xs sm:text-base text-gray-500">
-                اكتشف المنتجات المتاحة حاليًا وتواصل معنا لمعرفة الأسعار والكميات.
-              </p>
-            </div>
-          </div>
-
-          <ProductSearch
-            products={safeProducts}
-            categories={displayCategories}
-          />
-        </div>
-      </section>
-
       {/* About Section */}
       <section id="about" className="px-4 sm:px-6 lg:px-8 py-12 sm:py-20 w-full">
         <div className="mx-auto max-w-7xl">
@@ -686,11 +622,7 @@ export default async function Home() {
           <div className="mt-10 sm:mt-12 grid gap-6 text-xs sm:text-sm grid-cols-1 md:grid-cols-2 text-right">
             {/* Right card: Sales & Management */}
             <div className="rounded-2xl bg-white/[0.04] p-6 sm:p-7 border border-white/10 backdrop-blur-sm">
-              <p className="text-base font-bold text-white border-b border-white/10 pb-3 flex items-center gap-2">
-                <span>📞</span>
-                <span>المبيعات والإدارة</span>
-              </p>
-              <div className="mt-4 space-y-3 text-gray-300 text-xs sm:text-sm">
+              <div className="space-y-3 text-gray-300 text-xs sm:text-sm">
                 <div>
                   <p className="font-bold text-[#3b82f6]">مبيعات ومشتريات:</p>
                   <div className="mt-1.5 flex flex-col gap-1 pr-2">
@@ -723,26 +655,13 @@ export default async function Home() {
                       0554304322
                     </a>
                   </p>
-                  <p className="flex items-center justify-between sm:justify-start sm:gap-4">
-                    <span className="font-bold text-[#3b82f6]">البريد الإلكتروني:</span>{" "}
-                    <a href="mailto:Info@modernbuildingsa.com" className="hover:text-white transition font-mono" dir="ltr">
-                      Info@modernbuildingsa.com
-                    </a>
-                  </p>
                 </div>
               </div>
             </div>
 
-            {/* Left card: Legal & Address */}
+            {/* Left card: Legal & Address + Email */}
             <div className="rounded-2xl bg-white/[0.04] p-6 sm:p-7 border border-white/10 backdrop-blur-sm">
-              <p className="text-base font-bold text-white border-b border-white/10 pb-3 flex items-center gap-2">
-                <span>🧾</span>
-                <span>البيانات القانونية والعنوان</span>
-              </p>
-              <div className="mt-4 space-y-3 text-gray-300 text-xs sm:text-sm">
-                <p>
-                  <span className="font-bold text-[#3b82f6]">الاسم القانوني:</span> مؤسسة محل البناء الحديث للتجارة
-                </p>
+              <div className="space-y-3 text-gray-300 text-xs sm:text-sm">
                 <p>
                   <span className="font-bold text-[#3b82f6]">السجل التجاري:</span> <span dir="ltr" className="font-mono text-white font-semibold">5950008086</span>
                 </p>
@@ -757,6 +676,12 @@ export default async function Home() {
                 </p>
                 <p>
                   <span className="font-bold text-[#3b82f6]">الرمز البريدي:</span> <span dir="ltr" className="font-mono text-white font-semibold">66277</span>
+                </p>
+                <p className="pt-3 border-t border-white/10 flex items-center justify-between sm:justify-start sm:gap-4">
+                  <span className="font-bold text-[#3b82f6]">البريد الإلكتروني:</span>{" "}
+                  <a href="mailto:Info@modernbuildingsa.com" className="hover:text-white transition font-mono" dir="ltr">
+                    Info@modernbuildingsa.com
+                  </a>
                 </p>
               </div>
             </div>
