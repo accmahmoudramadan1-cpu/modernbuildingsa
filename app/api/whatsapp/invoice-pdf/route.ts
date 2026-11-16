@@ -130,15 +130,13 @@ export async function GET(request: NextRequest) {
   const paymentMethodAscii =
     safeMethodRaw.includes("آجل")
       ? "Credit"
-      : safeMethodRaw.includes("تحويل")
+      : safeMethodRaw.includes("تحويل") || safeMethodRaw.includes("حوالة") || safeMethodRaw.includes("شيك")
         ? "Bank Transfer"
-        : safeMethodRaw.includes("شيك")
-          ? "Cheque"
-          : safeMethodRaw.includes("نقد")
-            ? "Cash"
-            : safeMethodRaw.includes("خصم")
-              ? "Customer Discount"
-              : toSafePdfAscii(safeMethodRaw, docTypeKey === "credit_invoice" ? "Credit" : "Standard");
+        : safeMethodRaw.includes("نقد")
+          ? "Cash"
+          : safeMethodRaw.includes("خصم")
+            ? "Customer Discount"
+            : toSafePdfAscii(safeMethodRaw, docTypeKey === "credit_invoice" ? "Credit" : "Standard");
 
   const pdfBuffer = buildInvoicePdfBuffer({
     invoiceNumber: safeDocNo,

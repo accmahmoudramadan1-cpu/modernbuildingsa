@@ -158,7 +158,7 @@ ONYX_QUERIES = {
                 NULL AS REMAINING_BALANCE,
                 CASE NVL(V.VOUCHER_PAY_TYPE, 1)
                     WHEN 1 THEN 'نقداً'
-                    WHEN 2 THEN 'شيك'
+                    WHEN 2 THEN 'حوالة'
                     WHEN 3 THEN 'تحويل بنكي'
                     ELSE 'نقداً / تحويل بنكي'
                 END AS PAYMENT_METHOD,

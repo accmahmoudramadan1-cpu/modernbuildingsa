@@ -1,5 +1,5 @@
 import { createClient as createSupabaseServerClient } from "@/lib/supabase-server";
-import type { OnyxDocType } from "@/lib/onyx-templates";
+import { normalizePaymentMethod, type OnyxDocType } from "@/lib/onyx-templates";
 
 export interface OracleInvoice {
   id: string;
@@ -190,13 +190,17 @@ export async function getOracleInvoices(): Promise<OracleInvoice[]> {
       return data.map((row: any) => ({
         ...row,
         doc_type: (row.doc_type || "cash_invoice") as OnyxDocType,
+        payment_method: normalizePaymentMethod(row.payment_method),
       })) as OracleInvoice[];
     }
   } catch (err) {
     console.warn("[OracleInvoices] Supabase query skipped or failed, using memory cache.");
   }
 
-  return memoryInvoicesCache;
+  return memoryInvoicesCache.map((row) => ({
+    ...row,
+    payment_method: normalizePaymentMethod(row.payment_method),
+  }));
 }
 
 function sanitizeNumeric(val: unknown, fallback: number): number;
@@ -231,7 +235,7 @@ export async function upsertOracleInvoices(
     amount: sanitizeNumeric(item.amount, 0),
     currency: item.currency || "ر.س",
     remaining_balance: sanitizeNumeric(item.remaining_balance, null),
-    payment_method: item.payment_method ? String(item.payment_method).trim() : null,
+    payment_method: normalizePaymentMethod(item.payment_method),
     attachment_url: item.attachment_url ? String(item.attachment_url).trim() : null,
     onyx_form_code: item.onyx_form_code ? String(item.onyx_form_code).trim() : null,
     details: item.details || "",

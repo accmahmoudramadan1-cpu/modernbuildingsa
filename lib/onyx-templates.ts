@@ -168,6 +168,13 @@ export function getOnyxTemplate(docType?: string | null): OnyxTemplateDefinition
   return ONYX_TEMPLATES.cash_invoice;
 }
 
+export function normalizePaymentMethod(method?: string | null): string | null {
+  if (method === undefined || method === null) return null;
+  const trimmed = String(method).trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/شيك/g, "حوالة");
+}
+
 function formatAmountWithCurrency(
   value: number | string | null | undefined,
   currency: string = "ر.س",
@@ -212,7 +219,7 @@ export function extractTemplateParameters(
     case "receipt_voucher":
       return [
         amountWithCurr,
-        String(record.payment_method || "نقداً / تحويل بنكي").trim(),
+        normalizePaymentMethod(record.payment_method) || "نقداً / تحويل بنكي",
         dateVal,
         balanceVal,
       ];
