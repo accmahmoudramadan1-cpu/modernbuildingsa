@@ -1,24 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  getOracleInvoices,
-  upsertOracleInvoices,
-  updateInvoiceWhatsAppStatus,
-} from "@/lib/oracle-invoices";
-import { sendWhatsAppTemplate, formatPhoneNumber } from "@/lib/whatsapp";
-import { extractTemplateParameters, formatTemplatePreviewText, getOnyxTemplate } from "@/lib/onyx-templates";
+import { getOracleInvoices, upsertOracleInvoices } from "@/lib/oracle-invoices";
+import { autoDispatchOracleInvoice, isAutoSendEligible } from "@/lib/oracle-autosend";
 import { getWhatsAppSession } from "@/lib/whatsapp-auth";
 import { getAdminSession } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
-
-function isWithinRecentDays(dateStr: string | undefined | null, maxDays: number): boolean {
-  if (!dateStr) return true;
-  const parsed = Date.parse(dateStr);
-  if (Number.isNaN(parsed)) return false;
-  // Allow +1 day buffer for timezone ahead of UTC (e.g. KSA UTC+3)
-  const diffMs = Date.now() - parsed;
-  return diffMs <= maxDays * 86400 * 1000 && diffMs >= -2 * 86400 * 1000;
-}
 
 /**
  * GET /api/oracle-orders
@@ -103,60 +89,23 @@ export async function POST(request: NextRequest) {
     if (autoSendEnabled && result.newlyInserted.length > 0) {
       const isBulkDump = result.newlyInserted.length > 15;
       const eligibleDocs = result.newlyInserted.filter((doc) => {
-        if (doc.status !== "pending") return false;
-        // Purchase orders must NEVER be auto-sent; user triggers them manually in the portal
-        if (doc.doc_type === "purchase_order") return false;
-
-        const formattedPhone = formatPhoneNumber(doc.phone);
-        if (!formattedPhone || formattedPhone.length < 9) return false;
-
-        const isAlrtt002 = doc.onyx_form_code === "ALRTT002";
-        const isRecent = isWithinRecentDays(doc.invoice_date, 3);
-
+        if (!isAutoSendEligible(doc)) return false;
         if (isBulkDump) {
-          // On large initial sync dumps, only auto-send recent ALRTT002 alerts to prevent blasting old history
-          return isAlrtt002 && isRecent;
+          return doc.onyx_form_code === "ALRTT002";
         }
-        return isRecent || isAlrtt002;
+        return true;
       });
-
-      const publicBaseUrl =
-        process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com";
-      const languageCode = process.env.WHATSAPP_INVOICE_TEMPLATE_LANG || "ar";
 
       for (const doc of eligibleDocs) {
         try {
-          const templateDef = getOnyxTemplate(doc.doc_type);
-          const bodyParameters = extractTemplateParameters(templateDef.id, doc);
-          const fallbackPdfUrl = `${publicBaseUrl}/api/whatsapp/invoice-pdf?invoiceNumber=${encodeURIComponent(
-            doc.invoice_number
-          )}`;
-
-          const sendRes = await sendWhatsAppTemplate({
-            to: doc.phone,
-            templateName: templateDef.defaultMetaTemplateName,
-            languageCode,
-            bodyParameters,
-            headerUrl: doc.attachment_url || undefined,
-            fallbackPdfUrl,
-            documentFilename: `ModernBuilding_${doc.invoice_number.replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`,
-            customerName: doc.customer_name,
-            previewText: formatTemplatePreviewText(templateDef.id, bodyParameters),
-          });
-
-          await updateInvoiceWhatsAppStatus({
-            invoiceNumber: doc.invoice_number,
-            status: sendRes.success ? "sent" : "failed",
-            messageId: sendRes.messageId,
-          });
-
-          if (sendRes.success) {
+          const dispatch = await autoDispatchOracleInvoice(doc);
+          if (dispatch.outcome === "sent") {
             autoSentCount += 1;
-          } else {
+          } else if (dispatch.outcome === "failed") {
             autoFailedCount += 1;
             console.warn(
               `[API /api/oracle-orders AUTO-SEND] Failed for ${doc.invoice_number}:`,
-              sendRes.error
+              dispatch.error
             );
           }
         } catch (dispatchErr: any) {

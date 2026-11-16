@@ -162,7 +162,6 @@ export interface SendTemplateOptions {
   languageCode?: string;
   bodyParameters?: string[];
   headerUrl?: string;
-  fallbackPdfUrl?: string;
   documentFilename?: string;
   customerName?: string;
   previewText?: string;
@@ -186,7 +185,6 @@ export async function sendWhatsAppTemplate({
   languageCode = "ar",
   bodyParameters = [],
   headerUrl,
-  fallbackPdfUrl,
   documentFilename,
   customerName,
   previewText,
@@ -273,7 +271,6 @@ export async function sendWhatsAppTemplate({
 
   try {
     const cleanHeaderUrl = headerUrl ? String(headerUrl).trim() : "";
-    const cleanFallbackUrl = fallbackPdfUrl ? String(fallbackPdfUrl).trim() : "";
 
     let usedUrl: string | undefined = cleanHeaderUrl || undefined;
     let attempt = await postTemplate(buildComponents(usedUrl));
@@ -284,17 +281,13 @@ export async function sendWhatsAppTemplate({
       );
       usedUrl = undefined;
       attempt = await postTemplate(buildComponents(undefined));
-    } else if (
-      !attempt.ok &&
-      !cleanHeaderUrl &&
-      cleanFallbackUrl &&
-      isTemplateHeaderMismatchError(attempt.data)
-    ) {
-      console.warn(
-        `[WhatsApp Template] "${templateName}" requires a Document Header. Retrying with generated PDF (${cleanFallbackUrl})...`
-      );
-      usedUrl = cleanFallbackUrl;
-      attempt = await postTemplate(buildComponents(usedUrl));
+    } else if (!attempt.ok && !cleanHeaderUrl && isTemplateHeaderMismatchError(attempt.data)) {
+      return {
+        success: false,
+        error:
+          "يتطلب هذا القالب في Meta إرفاق ملف PDF الأصلي الصادر من أونكس، ولم يتم تصدير أو رفع ملف PDF لهذا المستند بعد.",
+        details: attempt.data,
+      };
     }
 
     if (!attempt.ok) {

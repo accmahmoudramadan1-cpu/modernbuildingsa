@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { executeSql, isMysqlConfigured } from "@/lib/mysql";
+import { executeSql, isMysqlConfigured, queryRows } from "@/lib/mysql";
 import { repairOnyxPdfFonts } from "@/lib/fix-onyx-pdf";
+import { autoDispatchOracleInvoice, isAutoSendEligible } from "@/lib/oracle-autosend";
 
 export const dynamic = "force-dynamic";
 
@@ -96,10 +97,34 @@ export async function POST(request: NextRequest) {
       [publicUrl, invoiceNumber]
     ).catch((err) => console.warn("[Upload PDF] Invoice attachment_url sync warning:", err));
 
+    // If this invoice was waiting in 'pending' status for its authentic Onyx PDF, dispatch now!
+    let autoDispatched = false;
+    try {
+      const invRows = await queryRows<any>(
+        `SELECT invoice_number, doc_type, customer_name, phone, invoice_date, amount,
+                currency, remaining_balance, payment_method, attachment_url,
+                onyx_form_code, details, status
+         FROM oracle_invoices
+         WHERE invoice_number = ?
+         LIMIT 1`,
+        [invoiceNumber]
+      );
+      if (invRows.length > 0) {
+        const doc = { ...invRows[0], attachment_url: publicUrl };
+        if (isAutoSendEligible(doc)) {
+          const dispatch = await autoDispatchOracleInvoice(doc);
+          autoDispatched = dispatch.outcome === "sent";
+        }
+      }
+    } catch (dispatchErr) {
+      console.warn("[Upload PDF] Late auto-dispatch check failed:", dispatchErr);
+    }
+
     return NextResponse.json({
       success: true,
       url: publicUrl,
       sizeBytes: pdfBuffer.length,
+      autoDispatched,
     });
   } catch (error: any) {
     console.error("[API /api/oracle-orders/upload-pdf] Exception:", error);

@@ -133,11 +133,20 @@ export async function POST(request: NextRequest) {
         customerName: effectiveCustomerName,
       });
     } else {
-      const publicBaseUrl =
-        process.env.NEXT_PUBLIC_SITE_URL || "https://www.modernbuildingsa.com";
-      const fallbackPdfUrl = `${publicBaseUrl}/api/whatsapp/invoice-pdf?invoiceNumber=${encodeURIComponent(
-        String(invoiceNumber)
-      )}`;
+      if (
+        sendMode === "template" &&
+        templateDef.hasAttachment &&
+        resolvedDocType !== "direct_alert" &&
+        !effectiveHeaderUrl
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `لا يمكن إرسال (${templateDef.label}) للمستند رقم (${invoiceNumber}) لأن ملف الـ PDF الأصلي الصادر من أونكس لم يُرفع بعد.`,
+          },
+          { status: 400 }
+        );
+      }
 
       result = await sendWhatsAppTemplate({
         to: phone,
@@ -145,7 +154,6 @@ export async function POST(request: NextRequest) {
         languageCode,
         bodyParameters,
         headerUrl: effectiveHeaderUrl,
-        fallbackPdfUrl,
         documentFilename: `ModernBuilding_${String(invoiceNumber).replace(/[^A-Za-z0-9_-]/g, "_")}.pdf`,
         customerName: effectiveCustomerName,
         previewText: formatTemplatePreviewText(resolvedDocType, bodyParameters),

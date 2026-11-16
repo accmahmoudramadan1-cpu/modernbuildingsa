@@ -57,7 +57,7 @@ UPLOAD_PDF_ENDPOINT = os.getenv(
 )
 API_KEY = os.getenv("ORACLE_SYNC_API_KEY", "modern_building_orant_sync_secret_2026")
 PDF_EXPORT_DIR = os.getenv("ORACLE_PDF_EXPORT_DIR", "").strip()
-PDF_WAIT_SECONDS = int(os.getenv("ORACLE_PDF_WAIT_SECONDS", "40"))
+PDF_WAIT_SECONDS = int(os.getenv("ORACLE_PDF_WAIT_SECONDS", "75"))
 
 # إعدادات اتصال أوراكل (مطابقة لملف tnsnames.ora في OraNT وبيانات العميل)
 ORACLE_HOST = os.getenv("ORACLE_HOST", "onyxserver")
@@ -1121,36 +1121,44 @@ def _find_local_onyx_pdf(doc: dict, pdf_index: list, used_paths: set = None):
     if not pdf_index:
         return None
 
-    # 2. Correlation via Onyx naming scheme PDF<5d FORM_NO><5d U_ID><DDMMYYYYHHMMSS>.pdf (e.g. D:\DOPDF or D:\MSG\IAS1\PDF\158)
+    # 2. Correlation via Onyx naming scheme PDF<5d FORM_NO><5d U_ID><DDMMYYYYHHMMSS>.pdf
+    #    Match against BOTH creator (AD_U_ID, AD_DATE) AND actual print/export events in IAS_AUD_PRNT_REP
+    candidate_anchors = []
+    expected_forms = _EXPECTED_FORMS_BY_DOC_TYPE.get(doc_type, set())
+
+    for p_form, p_uid, p_dt in (doc.get("_print_events") or []):
+        candidate_anchors.append((p_dt, p_uid, {p_form} if p_form else expected_forms))
+
     if ad_ts and ad_uid_raw is not None and str(ad_uid_raw).strip().isdigit():
         try:
-            doc_dt = datetime.fromisoformat(str(ad_ts))
-            target_uid = int(str(ad_uid_raw).strip())
-            expected_forms = _EXPECTED_FORMS_BY_DOC_TYPE.get(doc_type, set())
-            best_candidate = None
-            best_score = None
+            candidate_anchors.append((datetime.fromisoformat(str(ad_ts)), int(str(ad_uid_raw).strip()), expected_forms))
+        except ValueError:
+            pass
 
+    if candidate_anchors:
+        best_candidate = None
+        best_score = None
+
+        for target_dt, target_uid, anchor_forms in candidate_anchors:
             for _, full_path, _, parsed_meta in pdf_index:
                 if not parsed_meta or full_path in used_paths:
                     continue
                 form_no, file_uid, pdf_dt = parsed_meta
                 if file_uid != target_uid:
                     continue
-                if expected_forms and form_no not in expected_forms:
+                if anchor_forms and form_no not in anchor_forms:
                     continue
-                delta = (pdf_dt - doc_dt).total_seconds()
-                if -10 <= delta <= 90:
-                    # Prefer PDFs created shortly AFTER document AD_DATE, smallest positive delta first
+                delta = (pdf_dt - target_dt).total_seconds()
+                if -15 <= delta <= 180:
+                    # Prefer PDFs created shortly AFTER document/print timestamp, smallest delta first
                     score = (0 if delta >= 0 else 1, abs(delta))
                     if best_score is None or score < best_score:
                         if _is_ready_pdf(full_path):
                             best_score = score
                             best_candidate = full_path
 
-            if best_candidate:
-                return best_candidate
-        except ValueError:
-            pass
+        if best_candidate:
+            return best_candidate
 
     # 3. Direct filename token match (if user manually exports named PDFs)
     tokens = _candidate_doc_tokens(doc_no)
@@ -1255,6 +1263,41 @@ def _load_auto_msg_pdf_map(cursor):
     return by_srl_phone, by_srl, oracle_now_dt
 
 
+def _load_print_audit_map(cursor):
+    """جلب سجل أحداث الطباعة/التصدير من جدول IAS_AUD_PRNT_REP لربط ملفات PDF المطبوعة لاحقاً أو بمستخدم آخر"""
+    events_by_key = {}
+    try:
+        cursor.execute(
+            """
+            SELECT FORM_NO, AUD_U_ID, TO_CHAR(AUD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
+                   TO_CHAR(DOC_NO), TO_CHAR(DOC_SRL)
+            FROM IAS_AUD_PRNT_REP
+            WHERE AUD_DATE >= TRUNC(SYSDATE) - :days_back
+              AND AUD_DATE IS NOT NULL
+            ORDER BY AUD_DATE DESC
+            """,
+            {"days_back": SYNC_DAYS_BACK + 1},
+        )
+        for form_val, uid_val, dt_val, doc_no_val, doc_srl_val in cursor.fetchall():
+            if not dt_val or uid_val is None:
+                continue
+            try:
+                form_no = int(str(form_val).strip()) if form_val is not None else 0
+                uid = int(str(uid_val).strip())
+                aud_dt = datetime.fromisoformat(str(dt_val).strip())
+            except ValueError:
+                continue
+
+            entry = (form_no, uid, aud_dt)
+            for raw_k in (doc_no_val, doc_srl_val):
+                k = str(raw_k or "").strip().lower()
+                if k:
+                    events_by_key.setdefault(k, []).append(entry)
+    except Exception:
+        pass
+    return events_by_key
+
+
 def fetch_documents_from_oracle():
     """الاتصال بقاعدة بيانات أوراكل واسترجاع كافة العمليات من الجداول المفعلة"""
     print(f"[*] جاري الاتصال بقاعدة بيانات أوراكل ({ORACLE_HOST}:{ORACLE_PORT}/{ORACLE_SID})...")
@@ -1266,6 +1309,7 @@ def fetch_documents_from_oracle():
     try:
         cursor = conn.cursor()
         by_srl_phone, by_srl, oracle_now_dt = _load_auto_msg_pdf_map(cursor)
+        print_events_map = _load_print_audit_map(cursor)
 
         for section_name, cfg in ONYX_QUERIES.items():
             if not cfg.get("enabled"):
@@ -1304,6 +1348,10 @@ def fetch_documents_from_oracle():
                             except ValueError:
                                 age_seconds = None
 
+                        doc_print_events = []
+                        for pkey in list(dict.fromkeys([k.lower() for k in [doc_srl, doc_no] + _candidate_doc_tokens(doc_no) if k])):
+                            doc_print_events.extend(print_events_map.get(pkey, []))
+
                         documents.append({
                             "invoice_number": doc_no,
                             "doc_type": str(r[1] or "cash_invoice").strip(),
@@ -1321,6 +1369,7 @@ def fetch_documents_from_oracle():
                             "_doc_srl": doc_srl,
                             "_ad_ts": ad_ts,
                             "_ad_uid": ad_uid,
+                            "_print_events": doc_print_events,
                             "_age_seconds": age_seconds,
                         })
                     print(f"  [✓] {section_name}: تم سحب {len(rows)} سجل ({valid_count} برقم جوال صالح).")
