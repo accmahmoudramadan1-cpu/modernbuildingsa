@@ -14,6 +14,8 @@ set ORACLE_SID=orcl
 set ORACLE_USER=ONYX_READONLY
 set ORACLE_PASS=ModernSync_2026
 set ORACLE_SCHEMA=IAS20261
+rem Optional: set folder path where Onyx exports invoice PDFs (separate multiple paths with ;)
+set ORACLE_PDF_EXPORT_DIR=
 
 set "PY_EXE=python"
 where python >nul 2>&1

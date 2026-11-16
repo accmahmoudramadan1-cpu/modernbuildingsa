@@ -91,6 +91,9 @@ export async function POST(request: NextRequest) {
       const isBulkDump = result.newlyInserted.length > 15;
       const eligibleDocs = result.newlyInserted.filter((doc) => {
         if (doc.status !== "pending") return false;
+        // Purchase orders must NEVER be auto-sent; user triggers them manually in the portal
+        if (doc.doc_type === "purchase_order") return false;
+
         const formattedPhone = formatPhoneNumber(doc.phone);
         if (!formattedPhone || formattedPhone.length < 9) return false;
 

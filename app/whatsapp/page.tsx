@@ -466,6 +466,24 @@ export default function WhatsAppInvoicesPage() {
                           <p className="mt-1 font-mono text-[10px] font-bold text-gray-400">
                             {inv.onyx_form_code || tpl.onyxScreenCode}
                           </p>
+                          <div className="mt-1 flex flex-wrap gap-1">
+                            {inv.attachment_url && (
+                              <a
+                                href={inv.attachment_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 rounded-md bg-orange-50 px-1.5 py-0.5 text-[10px] font-black text-orange-700 hover:bg-orange-100"
+                              >
+                                <PaperclipIcon className="h-2.5 w-2.5" />
+                                <span>PDF أونكس</span>
+                              </a>
+                            )}
+                            {inv.doc_type === "purchase_order" && inv.status === "pending" && (
+                              <span className="inline-flex items-center rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] font-bold text-purple-700">
+                                إرسال يدوي فقط
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         <td className="px-5 py-4">

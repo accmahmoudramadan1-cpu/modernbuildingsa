@@ -26,6 +26,7 @@ import sys
 import os
 import time
 import glob
+import base64
 import sqlite3
 import argparse
 import re
@@ -50,7 +51,12 @@ except ImportError:
 # الإعدادات الافتراضية (جاهزة للعمل على جهاز العميل - يمكن تجاوزها بمتغيرات البيئة)
 # =============================================================================
 API_ENDPOINT = os.getenv("MODERN_BUILDING_API_URL", "https://www.modernbuildingsa.com/api/oracle-orders")
+UPLOAD_PDF_ENDPOINT = os.getenv(
+    "MODERN_BUILDING_UPLOAD_PDF_URL",
+    "https://www.modernbuildingsa.com/api/oracle-orders/upload-pdf",
+)
 API_KEY = os.getenv("ORACLE_SYNC_API_KEY", "modern_building_orant_sync_secret_2026")
+PDF_EXPORT_DIR = os.getenv("ORACLE_PDF_EXPORT_DIR", "").strip()
 
 # إعدادات اتصال أوراكل (مطابقة لملف tnsnames.ora في OraNT وبيانات العميل)
 ORACLE_HOST = os.getenv("ORACLE_HOST", "onyxserver")
@@ -195,7 +201,8 @@ ONYX_QUERIES = {
                 TO_CHAR(D.BLNC_MSG) AS REMAINING_BALANCE,
                 NULL AS PAYMENT_METHOD,
                 'ALRTT002' AS FORM_CODE,
-                H.MSG_TXT AS DETAILS
+                H.MSG_TXT AS DETAILS,
+                D.ATTCH_EMAIL_FILE AS ATTCH_PATH
             FROM IAS_MSG_SMS H
             JOIN IAS_MSG_SMS_DTL D ON D.MSG_NO = H.MSG_NO
             LEFT JOIN CUSTOMER C ON C.C_CODE = D.RCVR_CODE
@@ -240,6 +247,8 @@ ONYX_QUERIES = {
             LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = Q.C_CODE_CSH
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(Q.QUOT_CUR)
             WHERE Q.QUOT_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+              AND NVL(TO_CHAR(Q.APPROVED), '0') IN ('1', 'Y', 'y')
+              AND NVL(TO_CHAR(Q.INACTIVE), '0') NOT IN ('1', 'Y', 'y')
             ORDER BY Q.QUOT_DATE DESC, Q.QUOT_NO DESC
             """,
         ],
@@ -638,6 +647,180 @@ def _parse_amount(val, default=None):
     return default
 
 
+def check_extra_onyx_info():
+    """فحص حالة اعتماد عروض الأسعار (APPROVED) ومسارات ملفات PDF في أونكس"""
+    print("=" * 70)
+    print("  فحص حالة عروض الأسعار ومسارات ملفات PDF في Onyx Pro")
+    print("=" * 70)
+
+    if PDF_EXPORT_DIR:
+        idx = _build_pdf_index(PDF_EXPORT_DIR)
+        print(f"[✓] مجلد PDF ({PDF_EXPORT_DIR}): تم العثور على {len(idx)} ملف PDF.")
+        for stem, path, _ in idx[:5]:
+            print(f"    - {path}")
+    else:
+        print("[i] متغير ORACLE_PDF_EXPORT_DIR غير محدد حالياً.")
+
+    conn = get_oracle_connection()
+    if not conn:
+        return
+
+    try:
+        cur = conn.cursor()
+        print("\n[+] آخر 10 عروض أسعار (QUOTATION) وحالة اعتمادها (APPROVED):")
+        cur.execute("""
+            SELECT QUOT_NO, TO_CHAR(QUOT_DATE, 'YYYY-MM-DD'), APPROVED, TO_CHAR(APRV_DATE, 'YYYY-MM-DD'), INACTIVE
+            FROM (
+                SELECT QUOT_NO, QUOT_DATE, APPROVED, APRV_DATE, INACTIVE
+                FROM QUOTATION
+                ORDER BY QUOT_DATE DESC, QUOT_NO DESC
+            )
+            WHERE ROWNUM <= 10
+        """)
+        for row in cur.fetchall():
+            print(f"  - عرض #{row[0]} | تاريخ: {row[1]} | APPROVED={row[2]} | APRV_DATE={row[3]} | INACTIVE={row[4]}")
+
+        print("\n[+] آخر 10 مرفقات في شاشة التنبيهات (IAS_MSG_SMS_DTL.ATTCH_EMAIL_FILE):")
+        cur.execute("""
+            SELECT MSG_NO, RCVR_CODE, ATTCH_EMAIL_FILE
+            FROM (
+                SELECT MSG_NO, RCVR_CODE, ATTCH_EMAIL_FILE
+                FROM IAS_MSG_SMS_DTL
+                WHERE ATTCH_EMAIL_FILE IS NOT NULL
+                ORDER BY MSG_NO DESC, RCRD_NO DESC
+            )
+            WHERE ROWNUM <= 10
+        """)
+        attch_rows = cur.fetchall()
+        if attch_rows:
+            for row in attch_rows:
+                print(f"  - MSG#{row[0]} | عميل={row[1]} | الملف={row[2]}")
+        else:
+            print("  (لا توجد مسارات مسجلة في ATTCH_EMAIL_FILE)")
+
+        cur.close()
+        conn.close()
+    except Exception as err:
+        print(f"[!] خطأ أثناء الفحص الإضافي: {err}")
+
+
+def _build_pdf_index(export_dirs_str: str) -> list:
+    """فهرسة ملفات PDF من مجلدات تصدير أونكس (بعمق أقصى 3 مجلدات، مرتبة من الأحدث للأقدم)"""
+    entries = []
+    if not export_dirs_str:
+        return entries
+
+    for raw_dir in export_dirs_str.split(";"):
+        base_dir = raw_dir.strip().strip('"')
+        if not base_dir or not os.path.isdir(base_dir):
+            continue
+        base_depth = base_dir.rstrip("\\/").count(os.sep)
+        for root, dirs, files in os.walk(base_dir):
+            if root.rstrip("\\/").count(os.sep) - base_depth >= 3:
+                dirs[:] = []
+            for fname in files:
+                if fname.lower().endswith(".pdf"):
+                    full_path = os.path.join(root, fname)
+                    try:
+                        mtime = os.path.getmtime(full_path)
+                    except OSError:
+                        mtime = 0
+                    stem = os.path.splitext(fname)[0].lower()
+                    entries.append((stem, full_path, mtime))
+
+    entries.sort(key=lambda item: item[2], reverse=True)
+    return entries
+
+
+def _candidate_doc_tokens(doc_no: str) -> list:
+    raw = str(doc_no or "").strip().lower()
+    tokens = []
+    if raw:
+        tokens.append(raw)
+    # Extract core doc identifier for prefixed IDs like QT-104, PO-552, RV-412-702, ALRT-10-702
+    parts = [p for p in raw.split("-") if p]
+    if len(parts) >= 2 and parts[0] in ("qt", "po", "rv", "alrt", "arst"):
+        core = parts[1]
+        if len(core) >= 4 and core not in tokens:
+            tokens.append(core)
+        joined_rest = "-".join(parts[1:])
+        if len(joined_rest) >= 4 and joined_rest not in tokens:
+            tokens.append(joined_rest)
+    return tokens
+
+
+def _find_local_onyx_pdf(doc_no: str, attch_path: str, pdf_index: list):
+    """البحث عن ملف PDF الأصلي الصادر من أونكس سواء من ATTCH_EMAIL_FILE أو مجلد التصدير"""
+    if attch_path:
+        cleaned = str(attch_path).strip().strip('"')
+        if os.path.isfile(cleaned) and cleaned.lower().endswith(".pdf"):
+            return cleaned
+        base_name = os.path.basename(cleaned).lower()
+        if base_name.endswith(".pdf"):
+            base_stem = os.path.splitext(base_name)[0]
+            for stem, full_path, _ in pdf_index:
+                if stem == base_stem:
+                    return full_path
+
+    if not pdf_index:
+        return None
+
+    tokens = _candidate_doc_tokens(doc_no)
+    for token in tokens:
+        for stem, full_path, _ in pdf_index:
+            if stem == token:
+                return full_path
+
+    for token in tokens:
+        pattern = re.compile(rf"(?<![0-9a-z]){re.escape(token)}(?![0-9a-z])")
+        for stem, full_path, _ in pdf_index:
+            if pattern.search(stem):
+                return full_path
+
+    return None
+
+
+def upload_pdf_to_portal(upload_url: str, doc_no: str, pdf_path: str, api_key: str = ""):
+    """رفع ملف PDF الفعلي من جهاز السيرفر إلى البوابة والحصول على رابط HTTPS عام"""
+    try:
+        size_bytes = os.path.getsize(pdf_path)
+        if size_bytes <= 0 or size_bytes > 10 * 1024 * 1024:
+            print(f"  [!] تخطي رفع {pdf_path}: الحجم غير صالح ({size_bytes} bytes).")
+            return None
+
+        with open(pdf_path, "rb") as f:
+            raw_bytes = f.read()
+
+        if b"%PDF-" not in raw_bytes[:64]:
+            print(f"  [!] تخطي رفع {pdf_path}: الملف ليس PDF صالح.")
+            return None
+
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "OnyxPro-Sync-Agent/2.0",
+        }
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
+        payload = {
+            "invoiceNumber": doc_no,
+            "filename": os.path.basename(pdf_path),
+            "contentBase64": base64.b64encode(raw_bytes).decode("ascii"),
+        }
+        resp = requests.post(upload_url, json=payload, headers=headers, timeout=25)
+        if resp.status_code == 200:
+            data = resp.json()
+            url = data.get("url")
+            if url:
+                print(f"  [PDF] تم رفع فاتورة أونكس الأصلية ({os.path.basename(pdf_path)}) لعملية {doc_no}.")
+                return url
+        else:
+            print(f"  [!] تعذر رفع PDF ({doc_no}) - HTTP {resp.status_code}: {resp.text[:180]}")
+    except Exception as err:
+        print(f"  [!] خطأ أثناء رفع ملف PDF ({doc_no}): {err}")
+    return None
+
+
 def fetch_documents_from_oracle():
     """الاتصال بقاعدة بيانات أوراكل واسترجاع كافة العمليات من الجداول المفعلة"""
     print(f"[*] جاري الاتصال بقاعدة بيانات أوراكل ({ORACLE_HOST}:{ORACLE_PORT}/{ORACLE_SID})...")
@@ -668,6 +851,7 @@ def fetch_documents_from_oracle():
                         if not doc_no or not phone:
                             continue
                         valid_count += 1
+                        attch_path = str(r[12]).strip() if len(r) > 12 and r[12] is not None else None
                         documents.append({
                             "invoice_number": doc_no,
                             "doc_type": str(r[1] or "cash_invoice").strip(),
@@ -681,6 +865,7 @@ def fetch_documents_from_oracle():
                             "payment_method": str(r[9]).strip() if r[9] is not None else None,
                             "onyx_form_code": str(r[10]).strip() if r[10] is not None else None,
                             "details": str(r[11] or "").strip(),
+                            "_attch_path": attch_path,
                         })
                     print(f"  [✓] {section_name}: تم سحب {len(rows)} سجل ({valid_count} برقم جوال صالح).")
                     section_succeeded = True
@@ -825,6 +1010,12 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
         print("[i] لا توجد مستندات جديدة للمزامنة.")
         return 0
 
+    clean_docs = []
+    for doc in docs_list:
+        d = dict(doc)
+        d.pop("_attch_path", None)
+        clean_docs.append(d)
+
     headers = {
         "Content-Type": "application/json",
         "User-Agent": "OnyxPro-Sync-Agent/2.0",
@@ -832,10 +1023,10 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    print(f"[*] جاري إرسال {len(docs_list)} مستند/عملية إلى: {endpoint_url}...")
+    print(f"[*] جاري إرسال {len(clean_docs)} مستند/عملية إلى: {endpoint_url}...")
 
     try:
-        response = requests.post(endpoint_url, json={"invoices": docs_list}, headers=headers, timeout=25)
+        response = requests.post(endpoint_url, json={"invoices": clean_docs}, headers=headers, timeout=25)
         if response.status_code == 200:
             result = response.json()
             print(f"[نجاح] استجابة الخادم: {result.get('message', 'تمت المزامنة بنجاح')}")
@@ -865,8 +1056,10 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
 def main():
     parser = argparse.ArgumentParser(description="Onyx Pro / OraNT Multi-Template Sync Tool")
     parser.add_argument("--discover", action="store_true", help="فحص وعرض أسماء الجداول الفعلية في قاعدة أوراكل")
+    parser.add_argument("--check-extra", action="store_true", help="فحص اعتماد عروض الأسعار ومسارات ملفات PDF")
     parser.add_argument("--mock", action="store_true", help="تشغيل وضع التجربة وإرسال عينات لجميع القوالب الـ 8")
     parser.add_argument("--url", default=API_ENDPOINT, help="رابط الخادم المستقبل للعمليات")
+    parser.add_argument("--upload-pdf-url", default=UPLOAD_PDF_ENDPOINT, help="رابط رفع ملفات PDF الأصلية من أونكس")
     parser.add_argument("--key", default=API_KEY, help="مفتاح المزامنة السري (API Key)")
     parser.add_argument("--loop", type=int, default=0, help="تشغيل دوري كل N ثانية (0 للتنفيذ مرة واحدة)")
     args = parser.parse_args()
@@ -875,10 +1068,16 @@ def main():
         discover_onyx_tables()
         return
 
+    if args.check_extra:
+        check_extra_onyx_info()
+        return
+
     init_tracker_db()
     print("=" * 70)
     print("  بدء تشغيل أداة مزامنة Onyx Pro / OraNT مع modernbuildingsa.com/whatsapp")
     print(f"  الوجهة: {args.url}")
+    if PDF_EXPORT_DIR:
+        print(f"  مجلد PDF: {PDF_EXPORT_DIR}")
     print("=" * 70)
 
     while True:
@@ -892,6 +1091,20 @@ def main():
 
         if new_docs:
             print(f"[+] تم العثور على {len(new_docs)} عملية جديدة لم تُزامن بعد.")
+            # Upload matching local Onyx PDFs (from ATTCH_EMAIL_FILE or ORACLE_PDF_EXPORT_DIR)
+            if not args.mock:
+                has_attch = any(doc.get("_attch_path") for doc in new_docs)
+                if PDF_EXPORT_DIR or has_attch:
+                    pdf_index = _build_pdf_index(PDF_EXPORT_DIR)
+                    for doc in new_docs:
+                        attch_path = doc.pop("_attch_path", None)
+                        local_pdf = _find_local_onyx_pdf(doc["invoice_number"], attch_path, pdf_index)
+                        if local_pdf:
+                            uploaded_url = upload_pdf_to_portal(
+                                args.upload_pdf_url, doc["invoice_number"], local_pdf, args.key
+                            )
+                            if uploaded_url:
+                                doc["attachment_url"] = uploaded_url
             send_documents_to_portal(args.url, new_docs, args.key)
         else:
             print(f"[{datetime.now().strftime('%H:%M:%S')}] لا توجد عمليات جديدة.")
