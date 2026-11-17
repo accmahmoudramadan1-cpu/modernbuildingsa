@@ -94,7 +94,8 @@ export async function POST(request: NextRequest) {
         }
 
         // 1. Process Inbound Messages (and store media permanently in MySQL media_files)
-        if (Array.isArray(value.messages)) {
+        if (Array.isArray(value.messages) && value.messages.length > 0) {
+          console.log(`[WhatsApp Webhook] Inbound messages batch: count=${value.messages.length}`);
           for (const message of value.messages) {
             const from = String(message.from || "").replace(/\D/g, "");
             if (!from) continue;
@@ -180,7 +181,11 @@ export async function POST(request: NextRequest) {
         }
 
         // 2. Process Message Status Updates (SENT, DELIVERED, READ/SEEN, FAILED)
-        if (Array.isArray(value.statuses)) {
+        if (Array.isArray(value.statuses) && value.statuses.length > 0) {
+          const summary = value.statuses
+            .map((s: any) => String(s?.status || "unknown"))
+            .join(",");
+          console.log(`[WhatsApp Webhook] Status batch (${value.statuses.length}): ${summary}`);
           for (const st of value.statuses) {
             if (!st?.id || !st?.status) continue;
             const errMsg = st.errors?.[0]

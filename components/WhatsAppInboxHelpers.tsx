@@ -119,7 +119,7 @@ export function StatusTicks({
       title={isRead ? "تمت القراءة من العميل" : "تم التسليم لجهاز العميل"}
       className={`inline-flex items-center ${
         isRead
-          ? "text-emerald-600 drop-shadow-[0_0_4px_rgba(16,185,129,0.55)]"
+          ? "text-sky-500 drop-shadow-[0_0_2px_rgba(14,165,233,0.4)]"
           : "text-slate-500"
       }`}
     >

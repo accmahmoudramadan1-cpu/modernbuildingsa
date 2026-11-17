@@ -324,10 +324,19 @@ export async function updateWhatsAppMessageStatus(params: {
           : "sent";
 
   try {
-    const rows = await queryRows<any>(
+    let rows = await queryRows<any>(
       `SELECT id, phone, status, created_at FROM whatsapp_messages WHERE wa_message_id = ? LIMIT 1`,
       [params.waMessageId]
     );
+
+    // Handle rare race where Meta fires webhook before the outbound DB insert finishes committing
+    if (rows.length === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      rows = await queryRows<any>(
+        `SELECT id, phone, status, created_at FROM whatsapp_messages WHERE wa_message_id = ? LIMIT 1`,
+        [params.waMessageId]
+      );
+    }
 
     if (rows.length > 0) {
       const current = rows[0];
@@ -340,22 +349,20 @@ export async function updateWhatsAppMessageStatus(params: {
           [normalizedStatus, params.errorText || null, current.id]
         );
 
-        // Update conversation preview tick status if this message is the latest outbound one
-        const convRows = await queryRows<any>(
-          `SELECT last_message_direction, last_message_at FROM whatsapp_conversations WHERE phone = ? LIMIT 1`,
+        // Update conversation preview tick status when this message is the latest one in the thread
+        const latestRows = await queryRows<any>(
+          `SELECT id, direction FROM whatsapp_messages WHERE phone = ? ORDER BY created_at DESC LIMIT 1`,
           [current.phone]
         );
-        if (convRows.length > 0 && convRows[0].last_message_direction === "out") {
-          const msgTime = Date.parse(normalizeMysqlTimestampToIso(current.created_at) || "");
-          const convTime = Date.parse(
-            normalizeMysqlTimestampToIso(convRows[0].last_message_at) || ""
+        if (
+          latestRows.length > 0 &&
+          latestRows[0].id === current.id &&
+          latestRows[0].direction === "out"
+        ) {
+          await executeSql(
+            `UPDATE whatsapp_conversations SET last_message_status = ?, updated_at = NOW(3) WHERE phone = ?`,
+            [normalizedStatus, current.phone]
           );
-          if (Number.isNaN(msgTime) || Number.isNaN(convTime) || Math.abs(convTime - msgTime) <= 2000) {
-            await executeSql(
-              `UPDATE whatsapp_conversations SET last_message_status = ?, updated_at = NOW(3) WHERE phone = ?`,
-              [normalizedStatus, current.phone]
-            );
-          }
         }
       }
     }
