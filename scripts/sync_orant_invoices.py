@@ -484,22 +484,34 @@ def mark_invoice_as_synced(
     pdf_uploaded: int = 0,
     pdf_path: str = None,
 ):
-    """تسجيل المستند كمزامن بنجاح"""
+    """تسجيل المستند كمزامن بنجاح مع الحفاظ على حالة رفع الـ PDF السابقة إن لم يُمرر ملف جديد"""
+    inv_no = str(invoice_number).strip()
+    eff_pdf_uploaded = int(pdf_uploaded or 0)
+    eff_pdf_path = pdf_path
     conn = sqlite3.connect(TRACKER_DB_PATH)
     cur = conn.cursor()
+    if not eff_pdf_uploaded and not eff_pdf_path:
+        cur.execute(
+            "SELECT COALESCE(pdf_uploaded, 0), pdf_path FROM sent_invoices WHERE invoice_number = ?",
+            (inv_no,),
+        )
+        existing = cur.fetchone()
+        if existing and (existing[0] or existing[1]):
+            eff_pdf_uploaded = int(existing[0] or 0)
+            eff_pdf_path = existing[1]
     cur.execute("""
         INSERT OR REPLACE INTO sent_invoices (
             invoice_number, doc_type, customer_name, phone, amount, pdf_uploaded, pdf_path
         )
         VALUES (?, ?, ?, ?, ?, ?, ?)
     """, (
-        str(invoice_number).strip(),
+        inv_no,
         str(doc_type),
         customer_name,
         phone,
         float(amount or 0),
-        int(pdf_uploaded or 0),
-        pdf_path,
+        eff_pdf_uploaded,
+        eff_pdf_path,
     ))
     conn.commit()
     conn.close()
@@ -1298,6 +1310,34 @@ def _load_print_audit_map(cursor):
     return events_by_key
 
 
+def _load_customer_balances_map(cursor):
+    """جلب الأرصدة الفعلية الحية لجميع العملاء الآجلين من العرض الرسمي IAS_V_AC_CODE_DTL_LCL_BLNC"""
+    balances = {}
+    try:
+        cursor.execute(
+            """
+            SELECT TO_CHAR(C.C_CODE), ROUND(NVL(SUM(BL.AMT), 0), 2)
+            FROM CUSTOMER C
+            LEFT JOIN IAS_V_AC_CODE_DTL_LCL_BLNC BL
+              ON BL.AC_DTL_TYP = 3
+             AND BL.AC_CODE_DTL = TO_CHAR(C.C_CODE)
+             AND (C.C_A_CODE IS NULL OR BL.A_CODE = C.C_A_CODE)
+            GROUP BY C.C_CODE
+            """
+        )
+        for c_code_val, amt_val in cursor.fetchall():
+            if c_code_val is None:
+                continue
+            key = str(c_code_val).strip()
+            if key and amt_val is not None:
+                balances[key] = round(float(amt_val), 2)
+        if balances:
+            print(f"  [✓] IAS_V_AC_CODE_DTL_LCL_BLNC: تم تحميل أرصدة {len(balances)} عميل بدقة من أوراكل.")
+    except Exception as bal_err:
+        print(f"  [!] تعذر قراءة أرصدة العملاء من IAS_V_AC_CODE_DTL_LCL_BLNC: {bal_err}")
+    return balances
+
+
 def fetch_documents_from_oracle():
     """الاتصال بقاعدة بيانات أوراكل واسترجاع كافة العمليات من الجداول المفعلة"""
     print(f"[*] جاري الاتصال بقاعدة بيانات أوراكل ({ORACLE_HOST}:{ORACLE_PORT}/{ORACLE_SID})...")
@@ -1310,6 +1350,7 @@ def fetch_documents_from_oracle():
         cursor = conn.cursor()
         by_srl_phone, by_srl, oracle_now_dt = _load_auto_msg_pdf_map(cursor)
         print_events_map = _load_print_audit_map(cursor)
+        balances_by_cust = _load_customer_balances_map(cursor)
 
         for section_name, cfg in ONYX_QUERIES.items():
             if not cfg.get("enabled"):
@@ -1374,16 +1415,28 @@ def fetch_documents_from_oracle():
                         for pkey in list(dict.fromkeys([k.lower() for k in [doc_srl, doc_no] + _candidate_doc_tokens(doc_no) if k])):
                             doc_print_events.extend(print_events_map.get(pkey, []))
 
+                        doc_type_str = str(r[1] or "cash_invoice").strip()
+                        cust_code_str = str(r[2]).strip() if r[2] is not None else None
+                        rem_bal = _parse_amount(r[8], None)
+                        if rem_bal is None and cust_code_str and doc_type_str in (
+                            "credit_invoice",
+                            "receipt_voucher",
+                            "customer_discount_notice",
+                            "account_statement",
+                            "direct_alert",
+                        ):
+                            rem_bal = balances_by_cust.get(cust_code_str)
+
                         documents.append({
                             "invoice_number": doc_no,
-                            "doc_type": str(r[1] or "cash_invoice").strip(),
-                            "customer_code": str(r[2]).strip() if r[2] is not None else None,
+                            "doc_type": doc_type_str,
+                            "customer_code": cust_code_str,
                             "customer_name": str(r[3] or "عميل").strip(),
                             "phone": phone,
                             "invoice_date": str(r[5] or datetime.now().strftime("%Y-%m-%d")),
                             "amount": _parse_amount(r[6], 0.0),
                             "currency": str(r[7] or "ر.س").strip(),
-                            "remaining_balance": _parse_amount(r[8], None),
+                            "remaining_balance": rem_bal,
                             "payment_method": str(r[9]).strip() if r[9] is not None else None,
                             "onyx_form_code": str(r[10]).strip() if r[10] is not None else None,
                             "details": str(r[11] or "").strip(),
@@ -1586,6 +1639,7 @@ def main():
     parser.add_argument("--discover", action="store_true", help="فحص وعرض أسماء الجداول الفعلية في قاعدة أوراكل")
     parser.add_argument("--check-extra", action="store_true", help="فحص اعتماد عروض الأسعار ومسارات ملفات PDF")
     parser.add_argument("--find-pdfs", action="store_true", help="البحث التلقائي على الأقراص وأوراكل لاكتشاف مجلد تصدير PDF")
+    parser.add_argument("--refresh-balances", action="store_true", help="تحديث أرصدة العملاء الفعلية للمستندات المسجلة مسبقاً")
     parser.add_argument("--mock", action="store_true", help="تشغيل وضع التجربة وإرسال عينات لجميع القوالب الـ 8")
     parser.add_argument("--url", default=API_ENDPOINT, help="رابط الخادم المستقبل للعمليات")
     parser.add_argument("--upload-pdf-url", default=UPLOAD_PDF_ENDPOINT, help="رابط رفع ملفات PDF الأصلية من أونكس")
@@ -1603,6 +1657,20 @@ def main():
 
     if args.find_pdfs:
         find_onyx_pdf_locations()
+        return
+
+    if args.refresh_balances:
+        init_tracker_db()
+        docs = fetch_documents_from_oracle()
+        refresh_docs = [
+            doc for doc in docs
+            if doc.get("remaining_balance") is not None and is_invoice_synced(doc["invoice_number"])
+        ]
+        if refresh_docs:
+            print(f"[*] تحديث الأرصدة الفعلية لـ {len(refresh_docs)} سجل مسجل مسبقاً على البوابة...")
+            send_documents_to_portal(args.url, refresh_docs, args.key)
+        else:
+            print("[i] لا توجد مستندات مسجلة مسبقاً برصيد متاح للتحديث.")
         return
 
     active_pdf_dirs = _auto_detect_default_pdf_dirs()
