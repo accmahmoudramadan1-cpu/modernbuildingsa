@@ -30,7 +30,7 @@ import base64
 import sqlite3
 import argparse
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ضمان عدم حدوث UnicodeEncodeError عند توجيه المخرجات في Windows CMD أو ملفات السجل
 for _stream_name in ("stdout", "stderr"):
@@ -91,7 +91,14 @@ ONYX_QUERIES = {
                 CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END AS DOC_TYPE,
                 TO_CHAR(NVL(M.C_CODE, M.C_CODE_CSH)) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, M.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
-                COALESCE(C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO, M.C_TEL) AS PHONE,
+                COALESCE(
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), ''),
+                    NULLIF(TRIM(M.C_TEL), '')
+                ) AS PHONE,
                 TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(
                     NVL((
@@ -156,6 +163,44 @@ ONYX_QUERIES = {
             """,
         ],
     },
+    # 2b. مردود المبيعات النقدي والآجل (IAS_RT_BILL_MST + CUSTOMER + IAS_CASH_CUSTMR + EX_RATE)
+    "sales_returns": {
+        "enabled": True,
+        "sql_candidates": [
+            f"""
+            SELECT
+                'SR-' || TO_CHAR(M.RT_BILL_NO) AS DOC_NO,
+                CASE WHEN NVL(M.RT_BILL_DOC_TYPE, 1) = 1 THEN 'sales_return' ELSE 'credit_sales_return' END AS DOC_TYPE,
+                TO_CHAR(NVL(M.C_CODE, M.C_CODE_CSH)) AS CUST_CODE,
+                COALESCE(C.C_A_NAME, M.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
+                COALESCE(
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), ''),
+                    NULLIF(TRIM(M.C_TEL), '')
+                ) AS PHONE,
+                TO_CHAR(M.RT_BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                ROUND(NVL(M.BILL_AMT, 0) + NVL(M.VAT_AMT, 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0), 2) AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(M.RT_BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.RT_BILL_CURRENCY), 'ر.س'))) AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                CASE WHEN NVL(M.RT_BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
+                'SR' AS FORM_CODE,
+                NVL(M.A_DESC, M.RETURN_RES) AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(M.RT_BILL_SER) AS DOC_SRL,
+                TO_CHAR(M.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(M.AD_U_ID) AS AD_UID
+            FROM IAS_RT_BILL_MST M
+            LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = M.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(M.RT_BILL_CURRENCY)
+            WHERE M.RT_BILL_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            ORDER BY M.RT_BILL_DATE DESC, M.RT_BILL_NO DESC
+            """,
+        ],
+    },
     # 3. سندات القبض (VOUCHERS + VOUCHER_DETAIL + CUSTOMER + EX_RATE)
     "receipt_vouchers": {
         "enabled": True,
@@ -166,7 +211,11 @@ ONYX_QUERIES = {
                 'receipt_voucher' AS DOC_TYPE,
                 TO_CHAR(C.C_CODE) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, V.REC_NAME, V.REF_NAME, 'عميل') AS CUST_NAME,
-                COALESCE(C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
+                COALESCE(
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), '')
+                ) AS PHONE,
                 TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(NVL(SUM(NVL(VD.AC_AMT, 0)), NVL(MAX(V.CASH_AMT), 0)), 2) AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(V.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(V.A_CY), 'ر.س'))) AS CURRENCY,
@@ -242,7 +291,13 @@ ONYX_QUERIES = {
                 CASE WHEN D.ATTCH_EMAIL_FILE IS NOT NULL THEN 'account_statement' ELSE 'direct_alert' END AS DOC_TYPE,
                 TO_CHAR(D.RCVR_CODE) AS CUST_CODE,
                 COALESCE(D.RCVR_NM, C.C_A_NAME, 'عميل') AS CUST_NAME,
-                COALESCE(D.MOBILE_NO, H.MOBILE_NO, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE) AS PHONE,
+                COALESCE(
+                    NULLIF(TRIM(D.MOBILE_NO), ''),
+                    NULLIF(TRIM(H.MOBILE_NO), ''),
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), '')
+                ) AS PHONE,
                 TO_CHAR(NVL(H.AD_DATE, SYSDATE), 'YYYY-MM-DD') AS DOC_DATE,
                 TO_CHAR(D.BLNC_MSG) AS AMOUNT,
                 'ر.س' AS CURRENCY,
@@ -272,20 +327,29 @@ ONYX_QUERIES = {
                 'price_quotation' AS DOC_TYPE,
                 TO_CHAR(NVL(Q.C_CODE, Q.C_CODE_CSH)) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, Q.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
-                COALESCE(Q.MOBILE_NO, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
+                COALESCE(
+                    NULLIF(TRIM(Q.MOBILE_NO), ''),
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), '')
+                ) AS PHONE,
                 TO_CHAR(Q.QUOT_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(
-                    NVL(
-                        NULLIF(Q.QUOT_AMT, 0),
-                        NVL((
-                            SELECT SUM(
-                                (NVL(QD.I_QTY, 0) * (NVL(QD.I_PRICE, 0) - NVL(QD.DIS_AMT, 0)))
-                                + (NVL(QD.I_QTY, 0) * NVL(QD.VAT_AMT, 0))
-                            )
-                            FROM QUOTATION_DETAIL QD
-                            WHERE QD.QUOT_SER = Q.QUOT_SER
-                        ), 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
-                    ),
+                    CASE
+                        WHEN NVL(Q.QUOT_AMT, 0) > 0 THEN
+                            NVL(Q.QUOT_AMT, 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
+                        ELSE
+                            NVL((
+                                SELECT SUM(
+                                    (NVL(QD.I_QTY, 0) * (NVL(QD.I_PRICE, 0) - NVL(QD.DIS_AMT, 0)))
+                                    + (NVL(QD.I_QTY, 0) * NVL(QD.VAT_AMT, 0))
+                                )
+                                FROM QUOTATION_DETAIL QD
+                                WHERE QD.QUOT_SER = Q.QUOT_SER
+                            ), 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
+                    END,
                     2
                 ) AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(Q.QUOT_CUR))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(Q.QUOT_CUR), 'ر.س'))) AS CURRENCY,
@@ -308,7 +372,38 @@ ONYX_QUERIES = {
             """,
         ],
     },
-    # 6. طلبات الشراء للموردين (P_ORDER + P_ORDER_DETAIL + V_DETAILS + EX_RATE)
+    # 6a. طلبات الشراء للموردين شاشة APST001 (P_REQUEST + V_DETAILS + EX_RATE)
+    "purchase_requests": {
+        "enabled": True,
+        "sql_candidates": [
+            f"""
+            SELECT
+                'PR-' || TO_CHAR(A.PR_NO) AS DOC_NO,
+                'purchase_order' AS DOC_TYPE,
+                TO_CHAR(A.V_CODE) AS CUST_CODE,
+                NVL(B.V_A_NAME, A.V_NAME) AS CUST_NAME,
+                COALESCE(NULLIF(TRIM(B.V_MOBILE), ''), NULLIF(TRIM(B.V_PHONE), '')) AS PHONE,
+                TO_CHAR(A.PR_DATE, 'YYYY-MM-DD') AS DOC_DATE,
+                0 AS AMOUNT,
+                DECODE(UPPER(TRIM(TO_CHAR(A.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(A.A_CY), 'ر.س'))) AS CURRENCY,
+                NULL AS REMAINING_BALANCE,
+                NULL AS PAYMENT_METHOD,
+                'APST001' AS FORM_CODE,
+                NVL(A.PR_DESC, A.SIDE_REQ) AS DETAILS,
+                NULL AS ATTCH_PATH,
+                TO_CHAR(A.PR_SER) AS DOC_SRL,
+                TO_CHAR(A.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(A.AD_U_ID) AS AD_UID
+            FROM P_REQUEST A
+            LEFT JOIN V_DETAILS B ON B.V_CODE = A.V_CODE
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(A.A_CY)
+            WHERE A.PR_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+              AND NVL(TO_CHAR(A.INACTIVE), '0') NOT IN ('1', 'Y', 'y')
+            ORDER BY A.PR_DATE DESC, A.PR_NO DESC
+            """,
+        ],
+    },
+    # 6b. أوامر الشراء للموردين (P_ORDER + P_ORDER_DETAIL + V_DETAILS + EX_RATE)
     "purchase_orders": {
         "enabled": True,
         "sql_candidates": [
@@ -318,7 +413,7 @@ ONYX_QUERIES = {
                 'purchase_order' AS DOC_TYPE,
                 TO_CHAR(P.V_CODE) AS CUST_CODE,
                 NVL(V.V_A_NAME, P.V_NAME) AS CUST_NAME,
-                NVL(V.V_MOBILE, V.V_PHONE) AS PHONE,
+                COALESCE(NULLIF(TRIM(V.V_MOBILE), ''), NULLIF(TRIM(V.V_PHONE), '')) AS PHONE,
                 TO_CHAR(P.PO_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(
                     NVL(
@@ -361,11 +456,28 @@ ONYX_QUERIES = {
                 'customer_discount_notice' AS DOC_TYPE,
                 TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH)) AS CUST_CODE,
                 COALESCE(C.C_A_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
-                COALESCE(C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
+                COALESCE(
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), '')
+                ) AS PHONE,
                 TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 CASE
                     WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
-                        THEN ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
+                        THEN COALESCE(
+                            NULLIF(ROUND(
+                                DECODE(NVL(N.ADD_DISC_TYPE, 0),
+                                    2, NVL(N.ADD_DISC_AMT_DTL, 0) + NVL(N.ADD_VAT_AMT, 0),
+                                    DECODE(NVL(N.CLC_VAT_PRICE_TYP, 0),
+                                        2, NVL(N.ADD_DISC_AMT_MST_VAT, 0),
+                                        NVL(N.ADD_DISC_AMT_MST, 0) + NVL(N.ADD_VAT_AMT, 0)
+                                    )
+                                ), 2
+                            ), 0),
+                            ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
+                        )
                     ELSE ROUND(SUM(NVL(B.ADD_DISCOUNT, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
                 END AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(N.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(N.A_CY), 'ر.س'))) AS CURRENCY,
@@ -386,7 +498,8 @@ ONYX_QUERIES = {
             GROUP BY
                 N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
                 C.C_A_NAME, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.CUST_F_NM, CC.CUST_L_NM,
-                CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC
+                CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC,
+                N.ADD_DISC_TYPE, N.ADD_DISC_AMT_DTL, N.CLC_VAT_PRICE_TYP, N.ADD_DISC_AMT_MST_VAT, N.ADD_DISC_AMT_MST
             ORDER BY N.DOC_DATE DESC, N.DOC_NO DESC
             """,
             f"""
@@ -453,6 +566,34 @@ def init_tracker_db():
             cur.execute(alter_sql)
         except sqlite3.OperationalError:
             pass
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sync_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+def get_sync_state(key: str, default: str = None):
+    """قراءة قيمة حالة محفوظة في قاعدة SQLite المحلية"""
+    conn = sqlite3.connect(TRACKER_DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM sync_state WHERE key = ?", (str(key),))
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else default
+
+
+def set_sync_state(key: str, value: str):
+    """حفظ قيمة حالة في قاعدة SQLite المحلية"""
+    conn = sqlite3.connect(TRACKER_DB_PATH)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT OR REPLACE INTO sync_state (key, value) VALUES (?, ?)",
+        (str(key), str(value)),
+    )
     conn.commit()
     conn.close()
 
@@ -1015,10 +1156,14 @@ _ONYX_PDF_NAME_RE = re.compile(r"^pdf(\d{5})(\d{5})(\d{2})(\d{2})(\d{4})(\d{2})(
 _EXPECTED_FORMS_BY_DOC_TYPE = {
     "cash_invoice": {158},
     "credit_invoice": {158},
+    "sales_return": {160},
+    "credit_sales_return": {160},
     "customer_discount_notice": {875},
     "price_quotation": {155, 158},
+    "purchase_order": {125},
     "receipt_voucher": {23, 21},
-    "account_statement": {274},
+    "account_statement": {2502, 274},
+    "direct_alert": {2502},
 }
 
 
@@ -1097,7 +1242,7 @@ def _candidate_doc_tokens(doc_no: str) -> list:
         tokens.append(raw)
     # Extract core doc identifier for prefixed IDs like QT-104, PO-552, RV-412-702, ALRT-10-702
     parts = [p for p in raw.split("-") if p]
-    if len(parts) >= 2 and parts[0] in ("qt", "po", "rv", "alrt", "arst"):
+    if len(parts) >= 2 and parts[0] in ("qt", "po", "pr", "sr", "rv", "alrt", "arst"):
         core = parts[1]
         if len(core) >= 4 and core not in tokens:
             tokens.append(core)
@@ -1230,9 +1375,12 @@ def upload_pdf_to_portal(upload_url: str, doc_no: str, pdf_path: str, api_key: s
 
 
 def _load_auto_msg_pdf_map(cursor):
-    """جلب خريطة مسارات PDF الفعلية من عرض أونكس التلقائي S_V_MSG_MOBILE_AUTO"""
+    """جلب خرائط مسارات PDF وأرقام الجوال الفعلية من عرض أونكس التلقائي S_V_MSG_MOBILE_AUTO"""
     by_srl_phone = {}
     by_srl = {}
+    phone_by_srl = {}
+    by_phone_time = {}
+    seen_paths_by_phone = {}
     oracle_now_dt = datetime.now()
 
     try:
@@ -1246,33 +1394,106 @@ def _load_auto_msg_pdf_map(cursor):
     try:
         cursor.execute(
             """
-            SELECT TO_CHAR(DOC_SRL), MOBILE_NO, ATTCH_EMAIL_FILE
-            FROM (
-                SELECT DOC_SRL, MOBILE_NO, ATTCH_EMAIL_FILE
-                FROM S_V_MSG_MOBILE_AUTO
-                WHERE ATTCH_EMAIL_FILE IS NOT NULL
-                  AND NVL(AD_DATE, MSG_DATE) >= TRUNC(SYSDATE) - :days_back
-                ORDER BY SR_NO DESC
-            )
+            SELECT SR_NO,
+                   TO_CHAR(DOC_SRL),
+                   MOBILE_NO,
+                   ATTCH_EMAIL_FILE,
+                   TO_CHAR(NVL(AD_DATE, MSG_DATE), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                   DOC_TYP,
+                   MSG_TYP
+            FROM S_V_MSG_MOBILE_AUTO
+            WHERE (ATTCH_EMAIL_FILE IS NOT NULL OR MOBILE_NO IS NOT NULL)
+              AND NVL(AD_DATE, MSG_DATE) >= TRUNC(SYSDATE) - :days_back
+            ORDER BY SR_NO DESC
             """,
             {"days_back": SYNC_DAYS_BACK + 2},
         )
-        for doc_srl_val, mob_val, attch_val in cursor.fetchall():
-            if not doc_srl_val or not attch_val:
-                continue
-            srl_key = str(doc_srl_val).strip()
-            attch_str = str(attch_val).strip().strip('"')
+        for _sr_no, doc_srl_val, mob_val, attch_val, dt_iso, _doc_typ_val, _msg_typ_val in cursor.fetchall():
             c_phone = clean_phone_number(mob_val)
-            if c_phone and (srl_key, c_phone) not in by_srl_phone:
-                by_srl_phone[(srl_key, c_phone)] = attch_str
-            if srl_key not in by_srl:
-                by_srl[srl_key] = attch_str
-        if by_srl:
-            print(f"  [✓] S_V_MSG_MOBILE_AUTO: تم ربط {len(by_srl)} مسار PDF صادر من أونكس.")
+            attch_str = str(attch_val).strip().strip('"') if attch_val else ""
+
+            event_dt = None
+            if dt_iso:
+                try:
+                    event_dt = datetime.fromisoformat(str(dt_iso).strip())
+                except Exception:
+                    event_dt = None
+
+            if doc_srl_val:
+                srl_key = str(doc_srl_val).strip()
+                if c_phone and srl_key not in phone_by_srl:
+                    phone_by_srl[srl_key] = c_phone
+                if attch_str:
+                    if c_phone and (srl_key, c_phone) not in by_srl_phone:
+                        by_srl_phone[(srl_key, c_phone)] = attch_str
+                    if srl_key not in by_srl:
+                        by_srl[srl_key] = attch_str
+
+            if attch_str and c_phone and (not doc_srl_val or "2502" in attch_str):
+                seen = seen_paths_by_phone.setdefault(c_phone, set())
+                if attch_str not in seen:
+                    seen.add(attch_str)
+                    by_phone_time.setdefault(c_phone, []).append((event_dt, attch_str))
+        if by_srl or by_phone_time:
+            print(
+                f"  [✓] S_V_MSG_MOBILE_AUTO: تم ربط {len(by_srl)} مسار مستند + {sum(len(v) for v in by_phone_time.values())} مسار كشف/تنبيه."
+            )
     except Exception:
         pass
 
-    return by_srl_phone, by_srl, oracle_now_dt
+    return by_srl_phone, by_srl, phone_by_srl, by_phone_time, oracle_now_dt
+
+
+def _match_phone_time_pdf(phone: str, ad_ts: str, by_phone_time: dict, max_diff_seconds: int = 7200):
+    """مطابقة ملف PDF (مثل كشف الحساب 2502 من شاشة ALRTT002) برقم الجوال وزمن الإرسال"""
+    c_phone = clean_phone_number(phone)
+    if not c_phone or not by_phone_time:
+        return None
+    candidates = by_phone_time.get(c_phone)
+    if not candidates:
+        return None
+
+    target_dt = None
+    if ad_ts:
+        s = str(ad_ts).strip().replace("Z", "")
+        for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                target_dt = datetime.strptime(s[: len(datetime.now().strftime(fmt))], fmt)
+                break
+            except Exception:
+                pass
+        if target_dt is None:
+            try:
+                target_dt = datetime.fromisoformat(s)
+            except Exception:
+                target_dt = None
+
+    if target_dt is None:
+        return candidates[0][1]
+
+    best_path = None
+    best_diff = None
+    for event_dt, attch_str in candidates:
+        if event_dt is None:
+            continue
+        diff = abs((event_dt - target_dt).total_seconds())
+        if diff <= max_diff_seconds and (best_diff is None or diff < best_diff):
+            best_diff = diff
+            best_path = attch_str
+
+    if best_path:
+        return best_path
+
+    # إذا كان الطابع الزمني للسجل منتصف الليل أو فُتح قبل الإرسال بساعات في نفس اليوم
+    is_midnight = target_dt.hour == 0 and target_dt.minute == 0 and target_dt.second == 0
+    for event_dt, attch_str in candidates:
+        if event_dt is None:
+            continue
+        if event_dt.date() == target_dt.date():
+            if is_midnight or event_dt >= target_dt - timedelta(seconds=300):
+                return attch_str
+
+    return None
 
 
 def _load_print_audit_map(cursor):
@@ -1338,7 +1559,7 @@ def _load_customer_balances_map(cursor):
     return balances
 
 
-def fetch_documents_from_oracle():
+def fetch_documents_from_oracle(apply_cutoffs: bool = True):
     """الاتصال بقاعدة بيانات أوراكل واسترجاع كافة العمليات من الجداول المفعلة"""
     print(f"[*] جاري الاتصال بقاعدة بيانات أوراكل ({ORACLE_HOST}:{ORACLE_PORT}/{ORACLE_SID})...")
     conn = get_oracle_connection()
@@ -1348,9 +1569,21 @@ def fetch_documents_from_oracle():
     documents = []
     try:
         cursor = conn.cursor()
-        by_srl_phone, by_srl, oracle_now_dt = _load_auto_msg_pdf_map(cursor)
+        by_srl_phone, by_srl, phone_by_srl, by_phone_time, oracle_now_dt = _load_auto_msg_pdf_map(cursor)
         print_events_map = _load_print_audit_map(cursor)
         balances_by_cust = _load_customer_balances_map(cursor)
+
+        sales_return_cutoff_dt = None
+        if apply_cutoffs:
+            try:
+                cutoff_str = get_sync_state("sales_return_cutoff_ts")
+                if not cutoff_str:
+                    cutoff_dt_init = oracle_now_dt - timedelta(minutes=10)
+                    cutoff_str = cutoff_dt_init.strftime("%Y-%m-%dT%H:%M:%S")
+                    set_sync_state("sales_return_cutoff_ts", cutoff_str)
+                sales_return_cutoff_dt = datetime.fromisoformat(str(cutoff_str).strip())
+            except Exception:
+                sales_return_cutoff_dt = None
 
         for section_name, cfg in ONYX_QUERIES.items():
             if not cfg.get("enabled"):
@@ -1367,12 +1600,15 @@ def fetch_documents_from_oracle():
                     valid_count = 0
                     for r in rows:
                         doc_no = str(r[0]).strip() if r[0] is not None else ""
+                        doc_srl = str(r[13]).strip() if len(r) > 13 and r[13] is not None else None
                         phone = clean_phone_number(r[4])
+                        if not phone and doc_srl and doc_srl in phone_by_srl:
+                            phone = phone_by_srl[doc_srl]
                         if not doc_no or not phone:
                             continue
                         valid_count += 1
+                        doc_type_str = str(r[1] or "cash_invoice").strip()
                         attch_path = str(r[12]).strip() if len(r) > 12 and r[12] is not None else None
-                        doc_srl = str(r[13]).strip() if len(r) > 13 and r[13] is not None else None
                         ad_ts = str(r[14]).strip() if len(r) > 14 and r[14] is not None else None
                         ad_uid = str(r[15]).strip() if len(r) > 15 and r[15] is not None else None
 
@@ -1403,23 +1639,31 @@ def fetch_documents_from_oracle():
                                             break
                                     if attch_path:
                                         break
+                            if not attch_path and doc_type_str in ("account_statement", "direct_alert"):
+                                attch_path = _match_phone_time_pdf(phone, ad_ts, by_phone_time)
+
+                        if doc_type_str == "direct_alert" and attch_path:
+                            doc_type_str = "account_statement"
 
                         age_seconds = None
+                        ad_dt = None
                         if ad_ts:
                             try:
-                                age_seconds = (oracle_now_dt - datetime.fromisoformat(ad_ts)).total_seconds()
+                                ad_dt = datetime.fromisoformat(ad_ts)
+                                age_seconds = (oracle_now_dt - ad_dt).total_seconds()
                             except ValueError:
                                 age_seconds = None
+                                ad_dt = None
 
                         doc_print_events = []
                         for pkey in list(dict.fromkeys([k.lower() for k in [doc_srl, doc_no] + _candidate_doc_tokens(doc_no) if k])):
                             doc_print_events.extend(print_events_map.get(pkey, []))
 
-                        doc_type_str = str(r[1] or "cash_invoice").strip()
                         cust_code_str = str(r[2]).strip() if r[2] is not None else None
                         rem_bal = _parse_amount(r[8], None)
                         if rem_bal is None and cust_code_str and doc_type_str in (
                             "credit_invoice",
+                            "credit_sales_return",
                             "receipt_voucher",
                             "customer_discount_notice",
                             "account_statement",
@@ -1427,7 +1671,7 @@ def fetch_documents_from_oracle():
                         ):
                             rem_bal = balances_by_cust.get(cust_code_str)
 
-                        documents.append({
+                        doc_item = {
                             "invoice_number": doc_no,
                             "doc_type": doc_type_str,
                             "customer_code": cust_code_str,
@@ -1446,7 +1690,16 @@ def fetch_documents_from_oracle():
                             "_ad_uid": ad_uid,
                             "_print_events": doc_print_events,
                             "_age_seconds": age_seconds,
-                        })
+                        }
+                        if (
+                            apply_cutoffs
+                            and doc_type_str in ("sales_return", "credit_sales_return")
+                            and sales_return_cutoff_dt is not None
+                            and ad_dt is not None
+                            and ad_dt < sales_return_cutoff_dt
+                        ):
+                            doc_item["suppress_auto_send"] = True
+                        documents.append(doc_item)
                     print(f"  [✓] {section_name}: تم سحب {len(rows)} سجل ({valid_count} برقم جوال صالح).")
                     section_succeeded = True
                     break
@@ -1634,6 +1887,557 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
         return 0
 
 
+def _lookup_manual_doc_by_srl(
+    cursor,
+    doc_typ: int,
+    doc_srl: str,
+    custom_phone: str,
+    balances_by_cust: dict,
+):
+    """جلب بيانات المستند من أوراكل لعمليات الإرسال اليدوي من زر (إرسال إلى -> واتساب) MSG_TYP=99"""
+    if not doc_srl:
+        return None
+    srl = str(doc_srl).strip()
+    bind = {"doc_srl": srl}
+
+    sql_by_typ = {
+        4: """
+            SELECT
+                TO_CHAR(M.BILL_NO),
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'cash_invoice' ELSE 'credit_invoice' END,
+                TO_CHAR(NVL(M.C_CODE, M.C_CODE_CSH)),
+                COALESCE(C.C_A_NAME, M.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل'),
+                COALESCE(
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), ''),
+                    NULLIF(TRIM(M.C_TEL), '')
+                ),
+                TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD'),
+                ROUND(
+                    NVL((
+                        SELECT SUM(
+                            (NVL(D.I_QTY, 0) * (NVL(D.I_PRICE, 0) - NVL(D.DIS_AMT, 0)))
+                            + (NVL(D.I_QTY, 0) * NVL(D.VAT_AMT, 0))
+                        )
+                        FROM IAS_BILL_DTL D
+                        WHERE D.BILL_SER = M.BILL_SER
+                    ), 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0),
+                    2
+                ),
+                DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س'))),
+                NULL,
+                CASE WHEN NVL(M.BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END,
+                'SI',
+                M.A_DESC,
+                TO_CHAR(M.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(M.AD_U_ID)
+            FROM IAS_BILL_MST M
+            LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = M.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(M.BILL_CURRENCY)
+            WHERE TO_CHAR(M.BILL_SER) = :doc_srl
+        """,
+        5: """
+            SELECT
+                'SR-' || TO_CHAR(M.RT_BILL_NO),
+                CASE WHEN NVL(M.RT_BILL_DOC_TYPE, 1) = 1 THEN 'sales_return' ELSE 'credit_sales_return' END,
+                TO_CHAR(NVL(M.C_CODE, M.C_CODE_CSH)),
+                COALESCE(C.C_A_NAME, M.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل'),
+                COALESCE(
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), ''),
+                    NULLIF(TRIM(M.C_TEL), '')
+                ),
+                TO_CHAR(M.RT_BILL_DATE, 'YYYY-MM-DD'),
+                ROUND(NVL(M.BILL_AMT, 0) + NVL(M.VAT_AMT, 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0), 2),
+                DECODE(UPPER(TRIM(TO_CHAR(M.RT_BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.RT_BILL_CURRENCY), 'ر.س'))),
+                NULL,
+                CASE WHEN NVL(M.RT_BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END,
+                'SR',
+                NVL(M.A_DESC, M.RETURN_RES),
+                TO_CHAR(M.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(M.AD_U_ID)
+            FROM IAS_RT_BILL_MST M
+            LEFT JOIN CUSTOMER C ON C.C_CODE = M.C_CODE
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = M.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(M.RT_BILL_CURRENCY)
+            WHERE TO_CHAR(M.RT_BILL_SER) = :doc_srl
+        """,
+        52: """
+            SELECT
+                'QT-' || TO_CHAR(Q.QUOT_NO),
+                'price_quotation',
+                TO_CHAR(NVL(Q.C_CODE, Q.C_CODE_CSH)),
+                COALESCE(C.C_A_NAME, Q.C_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل'),
+                COALESCE(
+                    NULLIF(TRIM(Q.MOBILE_NO), ''),
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), '')
+                ),
+                TO_CHAR(Q.QUOT_DATE, 'YYYY-MM-DD'),
+                ROUND(
+                    CASE
+                        WHEN NVL(Q.QUOT_AMT, 0) > 0 THEN
+                            NVL(Q.QUOT_AMT, 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
+                        ELSE
+                            NVL((
+                                SELECT SUM(
+                                    (NVL(QD.I_QTY, 0) * (NVL(QD.I_PRICE, 0) - NVL(QD.DIS_AMT, 0)))
+                                    + (NVL(QD.I_QTY, 0) * NVL(QD.VAT_AMT, 0))
+                                )
+                                FROM QUOTATION_DETAIL QD
+                                WHERE QD.QUOT_SER = Q.QUOT_SER
+                            ), 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
+                    END,
+                    2
+                ),
+                DECODE(UPPER(TRIM(TO_CHAR(Q.QUOT_CUR))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(Q.QUOT_CUR), 'ر.س'))),
+                NULL,
+                NULL,
+                'QT',
+                Q.A_DESC,
+                TO_CHAR(NVL(Q.APRV_DATE, Q.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(Q.AD_U_ID)
+            FROM QUOTATION Q
+            LEFT JOIN CUSTOMER C ON C.C_CODE = Q.C_CODE
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = Q.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(Q.QUOT_CUR)
+            WHERE TO_CHAR(Q.QUOT_SER) = :doc_srl
+        """,
+        2: """
+            SELECT
+                CASE
+                    WHEN MAX(CASE WHEN C.C_CODE IS NOT NULL THEN C.C_CODE ELSE VD.C_CODE END) IS NOT NULL
+                        THEN 'RV-' || TO_CHAR(V.VOUCHER_NO) || '-' || TO_CHAR(MAX(CASE WHEN C.C_CODE IS NOT NULL THEN C.C_CODE ELSE VD.C_CODE END))
+                    ELSE 'RV-' || TO_CHAR(V.VOUCHER_NO)
+                END,
+                'receipt_voucher',
+                TO_CHAR(MAX(CASE WHEN C.C_CODE IS NOT NULL THEN C.C_CODE ELSE COALESCE(VD.C_CODE, VD.AC_CODE_DTL) END)),
+                COALESCE(MAX(C.C_A_NAME), MAX(V.REC_NAME), MAX(V.REF_NAME), 'عميل'),
+                COALESCE(
+                    NULLIF(TRIM(MAX(C.C_WHATSAPP_NO)), ''),
+                    NULLIF(TRIM(MAX(C.C_MOBILE)), ''),
+                    NULLIF(TRIM(MAX(C.C_PHONE)), '')
+                ),
+                TO_CHAR(V.VOUCHER_DATE, 'YYYY-MM-DD'),
+                ROUND(
+                    COALESCE(
+                        NULLIF(ABS(SUM(CASE WHEN C.C_CODE IS NOT NULL THEN NVL(VD.AC_AMT, 0) ELSE 0 END)), 0),
+                        ABS(NVL(MAX(V.CASH_AMT), 0)),
+                        ABS(NVL(SUM(NVL(VD.AC_AMT, 0)), 0))
+                    ),
+                    2
+                ),
+                DECODE(UPPER(TRIM(TO_CHAR(V.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(V.A_CY), 'ر.س'))),
+                NULL,
+                CASE NVL(V.VOUCHER_PAY_TYPE, 1)
+                    WHEN 1 THEN 'نقداً'
+                    WHEN 2 THEN 'حوالة'
+                    WHEN 3 THEN 'تحويل بنكي'
+                    ELSE 'نقداً / تحويل بنكي'
+                END,
+                'RV',
+                NVL(MAX(VD.AC_DESC), V.A_DESC),
+                TO_CHAR(MAX(V.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(MAX(V.AD_U_ID))
+            FROM VOUCHERS V
+            LEFT JOIN VOUCHER_DETAIL VD ON VD.V_SER = V.V_SER AND VD.VOUCHER_TYPE = V.VOUCHER_TYPE
+            LEFT JOIN CUSTOMER C ON C.C_CODE = COALESCE(VD.C_CODE, VD.AC_CODE_DTL)
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(V.A_CY)
+            WHERE TO_CHAR(V.V_SER) = :doc_srl
+            GROUP BY V.VOUCHER_NO, V.VOUCHER_DATE, V.VOUCHER_PAY_TYPE, V.A_CY, E.CUR_NAME, V.A_DESC
+        """,
+        40: """
+            SELECT
+                'PR-' || TO_CHAR(A.PR_NO),
+                'purchase_order',
+                TO_CHAR(A.V_CODE),
+                NVL(B.V_A_NAME, A.V_NAME),
+                COALESCE(NULLIF(TRIM(B.V_MOBILE), ''), NULLIF(TRIM(B.V_PHONE), '')),
+                TO_CHAR(A.PR_DATE, 'YYYY-MM-DD'),
+                0,
+                DECODE(UPPER(TRIM(TO_CHAR(A.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(A.A_CY), 'ر.س'))),
+                NULL,
+                NULL,
+                'APST001',
+                NVL(A.PR_DESC, A.SIDE_REQ),
+                TO_CHAR(A.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(A.AD_U_ID)
+            FROM P_REQUEST A
+            LEFT JOIN V_DETAILS B ON B.V_CODE = A.V_CODE
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(A.A_CY)
+            WHERE TO_CHAR(A.PR_SER) = :doc_srl
+        """,
+        53: """
+            SELECT
+                'PO-' || TO_CHAR(P.PO_NO),
+                'purchase_order',
+                TO_CHAR(P.V_CODE),
+                NVL(V.V_A_NAME, P.V_NAME),
+                COALESCE(NULLIF(TRIM(V.V_MOBILE), ''), NULLIF(TRIM(V.V_PHONE), '')),
+                TO_CHAR(P.PO_DATE, 'YYYY-MM-DD'),
+                ROUND(
+                    NVL(
+                        NULLIF(P.PO_AMT, 0),
+                        NVL((
+                            SELECT SUM(
+                                (NVL(PD.I_QTY, 0) * (NVL(PD.I_PRICE, 0) - NVL(PD.DIS_AMT, 0)))
+                                + (NVL(PD.I_QTY, 0) * NVL(PD.VAT_AMT, 0))
+                            )
+                            FROM P_ORDER_DETAIL PD
+                            WHERE PD.PO_SER = P.PO_SER
+                        ), 0) - NVL(P.DISC_AMT, 0) + NVL(P.VAT_AMT, 0) + NVL(P.OTHR_AMT, 0)
+                    ),
+                    2
+                ),
+                DECODE(UPPER(TRIM(TO_CHAR(P.CUR_CODE))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(P.CUR_CODE), 'ر.س'))),
+                NULL,
+                NULL,
+                'PO',
+                P.PO_DESC,
+                TO_CHAR(P.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(P.AD_U_ID)
+            FROM P_ORDER P
+            LEFT JOIN V_DETAILS V ON V.V_CODE = P.V_CODE
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(P.CUR_CODE)
+            WHERE TO_CHAR(P.PO_SER) = :doc_srl
+        """,
+        15: """
+            SELECT
+                'ARST-' || TO_CHAR(N.DOC_NO) || '-' || TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH, '0')),
+                'customer_discount_notice',
+                TO_CHAR(COALESCE(N.C_CODE, B.C_CODE, N.C_CODE_CSH)),
+                COALESCE(C.C_A_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل'),
+                COALESCE(
+                    NULLIF(TRIM(C.C_WHATSAPP_NO), ''),
+                    NULLIF(TRIM(C.C_MOBILE), ''),
+                    NULLIF(TRIM(C.C_PHONE), ''),
+                    NULLIF(TRIM(CC.MOBILE_NO), ''),
+                    NULLIF(TRIM(CC.TEL_NO), '')
+                ),
+                TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD'),
+                CASE
+                    WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
+                        THEN COALESCE(
+                            NULLIF(ROUND(
+                                DECODE(NVL(N.ADD_DISC_TYPE, 0),
+                                    2, NVL(N.ADD_DISC_AMT_DTL, 0) + NVL(N.ADD_VAT_AMT, 0),
+                                    DECODE(NVL(N.CLC_VAT_PRICE_TYP, 0),
+                                        2, NVL(N.ADD_DISC_AMT_MST_VAT, 0),
+                                        NVL(N.ADD_DISC_AMT_MST, 0) + NVL(N.ADD_VAT_AMT, 0)
+                                    )
+                                ), 2
+                            ), 0),
+                            ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
+                        )
+                    ELSE ROUND(SUM(NVL(B.ADD_DISCOUNT, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
+                END,
+                DECODE(UPPER(TRIM(TO_CHAR(N.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(N.A_CY), 'ر.س'))),
+                NULL,
+                NVL(N.DOC_DESC, 'خصم سداد'),
+                'ARST045',
+                N.DOC_DESC,
+                TO_CHAR(MAX(N.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(MAX(N.AD_U_ID))
+            FROM IAS_BILL_MST_ADD_DISC N
+            LEFT JOIN IAS_BILL_ADD_DISC_BILLS B ON B.DOC_SER = N.DOC_SER
+            LEFT JOIN CUSTOMER C ON C.C_CODE = COALESCE(N.C_CODE, B.C_CODE)
+            LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = N.C_CODE_CSH
+            LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(N.A_CY)
+            WHERE TO_CHAR(N.DOC_SER) = :doc_srl
+            GROUP BY
+                N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
+                C.C_A_NAME, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.CUST_F_NM, CC.CUST_L_NM,
+                CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC,
+                N.ADD_DISC_TYPE, N.ADD_DISC_AMT_DTL, N.CLC_VAT_PRICE_TYP, N.ADD_DISC_AMT_MST_VAT, N.ADD_DISC_AMT_MST
+        """,
+    }
+
+    sql = sql_by_typ.get(doc_typ)
+    if not sql:
+        return None
+
+    try:
+        cursor.execute(sql, bind)
+        r = cursor.fetchone()
+    except Exception:
+        return None
+
+    if not r:
+        return None
+
+    doc_no = str(r[0]).strip() if r[0] is not None else ""
+    doc_type_str = str(r[1] or "cash_invoice").strip()
+    cust_code_str = str(r[2]).strip() if r[2] is not None else None
+    cust_name = str(r[3] or "عميل").strip()
+    db_phone = clean_phone_number(r[4])
+    target_phone = clean_phone_number(custom_phone) or db_phone
+    if not doc_no or not target_phone:
+        return None
+
+    rem_bal = _parse_amount(r[8], None)
+    if rem_bal is None and cust_code_str and doc_type_str in (
+        "credit_invoice",
+        "credit_sales_return",
+        "receipt_voucher",
+        "customer_discount_notice",
+        "account_statement",
+        "direct_alert",
+    ):
+        rem_bal = balances_by_cust.get(cust_code_str)
+
+    return {
+        "invoice_number": doc_no,
+        "doc_type": doc_type_str,
+        "customer_code": cust_code_str,
+        "customer_name": cust_name,
+        "phone": target_phone,
+        "invoice_date": str(r[5] or datetime.now().strftime("%Y-%m-%d")),
+        "amount": _parse_amount(r[6], 0.0),
+        "currency": str(r[7] or "ر.س").strip(),
+        "remaining_balance": rem_bal,
+        "payment_method": str(r[9]).strip() if r[9] is not None else None,
+        "onyx_form_code": str(r[10]).strip() if r[10] is not None else None,
+        "details": str(r[11] or "").strip(),
+        "_doc_srl": srl,
+        "_ad_ts": str(r[12]).strip() if r[12] is not None else None,
+        "_ad_uid": str(r[13]).strip() if r[13] is not None else None,
+        "force_auto_send": True,
+    }
+
+
+def _lookup_customer_by_phone(cursor, phone: str, balances_by_cust: dict):
+    """البحث عن بيانات العميل ورصيده عبر رقم الجوال لإشعارات ALRTT002 المباشرة"""
+    digits = re.sub(r"\D", "", str(phone or ""))
+    if len(digits) < 7:
+        return None, "عميل", None
+    tail = digits[-9:]
+    try:
+        cursor.execute(
+            """
+            SELECT TO_CHAR(C_CODE), C_A_NAME
+            FROM CUSTOMER
+            WHERE REGEXP_REPLACE(NVL(C_WHATSAPP_NO, '') || ',' || NVL(C_MOBILE, '') || ',' || NVL(C_PHONE, ''), '[^0-9,]', '') LIKE :pat
+            FETCH FIRST 1 ROWS ONLY
+            """,
+            {"pat": f"%{tail}%"},
+        )
+        row = cursor.fetchone()
+    except Exception:
+        try:
+            cursor.execute(
+                """
+                SELECT TO_CHAR(C_CODE), C_A_NAME
+                FROM CUSTOMER
+                WHERE (C_WHATSAPP_NO LIKE :pat OR C_MOBILE LIKE :pat OR C_PHONE LIKE :pat)
+                  AND ROWNUM = 1
+                """,
+                {"pat": f"%{tail}%"},
+            )
+            row = cursor.fetchone()
+        except Exception:
+            row = None
+
+    if not row:
+        return None, "عميل", None
+    c_code = str(row[0]).strip() if row[0] is not None else None
+    c_name = str(row[1] or "عميل").strip()
+    rem_bal = balances_by_cust.get(c_code) if c_code else None
+    return c_code, c_name, rem_bal
+
+
+def _get_synced_pdf_paths() -> set:
+    """جمع مسارات ملفات PDF التي تم رفعها ومزامنتها مسبقاً في SQLite"""
+    paths = set()
+    try:
+        conn = sqlite3.connect(TRACKER_DB_PATH)
+        cur = conn.cursor()
+        cur.execute("SELECT pdf_path FROM sent_invoices WHERE pdf_path IS NOT NULL AND pdf_path != ''")
+        for (p,) in cur.fetchall():
+            if p:
+                paths.add(os.path.normcase(str(p).strip()))
+        conn.close()
+    except Exception:
+        pass
+    return paths
+
+
+def _process_manual_button_sends(
+    endpoint_url: str,
+    upload_pdf_url: str,
+    api_key: str,
+    active_pdf_dirs: str,
+    handled_pdf_paths: set,
+    just_auto_sent_pairs: set,
+):
+    """معالجة ضغطات زر (إرسال إلى -> واتساب) اليدوية من S_V_MSG_MOBILE_AUTO (MSG_TYP=99 / كشف ALRTT002)"""
+    conn = get_oracle_connection()
+    if not conn:
+        return 0
+
+    sent_count = 0
+    try:
+        cursor = conn.cursor()
+        last_sr_str = get_sync_state("manual_send_cutoff_sr")
+        if last_sr_str is None:
+            cursor.execute("SELECT NVL(MAX(SR_NO), 0) FROM S_V_MSG_MOBILE_AUTO")
+            max_row = cursor.fetchone()
+            max_sr = int(max_row[0] or 0) if max_row else 0
+            set_sync_state("manual_send_cutoff_sr", str(max_sr))
+            print(f"  [✓] تهيئة مؤشر زر الإرسال اليدوي (manual_send_cutoff_sr={max_sr}).")
+            cursor.close()
+            conn.close()
+            return 0
+
+        last_sr = int(str(last_sr_str).strip() or "0")
+        cursor.execute(
+            """
+            SELECT SR_NO,
+                   DOC_TYP,
+                   TO_CHAR(DOC_SRL),
+                   MSG_TYP,
+                   MSG_MTHD_SEND,
+                   MOBILE_NO,
+                   MSG_TXT,
+                   ATTCH_EMAIL_FILE,
+                   TO_CHAR(NVL(AD_DATE, MSG_DATE), 'YYYY-MM-DD"T"HH24:MI:SS')
+            FROM S_V_MSG_MOBILE_AUTO
+            WHERE SR_NO > :last_sr
+              AND MSG_MTHD_SEND = 8
+              AND (
+                  MSG_TYP = 99
+                  OR (MSG_TYP = 1 AND DOC_TYP IS NULL AND ATTCH_EMAIL_FILE IS NOT NULL)
+              )
+            ORDER BY SR_NO ASC
+            """,
+            {"last_sr": last_sr},
+        )
+        events = cursor.fetchall()
+        if not events:
+            cursor.close()
+            conn.close()
+            return 0
+
+        balances_by_cust = _load_customer_balances_map(cursor)
+        synced_pdf_paths = _get_synced_pdf_paths() | handled_pdf_paths
+        pdf_index = None
+
+        docs_to_send = []
+        max_advance_sr = last_sr
+        network_failed = False
+
+        for ev in events:
+            sr_no = int(ev[0])
+            doc_typ = int(ev[1]) if ev[1] is not None else None
+            doc_srl = str(ev[2]).strip() if ev[2] is not None else None
+            msg_typ = int(ev[3]) if ev[3] is not None else None
+            mob_val = ev[5]
+            msg_txt = str(ev[6] or "").strip()
+            attch_str = str(ev[7] or "").strip().strip('"')
+            dt_iso = str(ev[8] or "").strip()
+
+            target_phone = clean_phone_number(mob_val)
+            manual_doc = None
+
+            if msg_typ == 99 and doc_typ in (4, 5, 52, 2, 40, 53, 15) and doc_srl:
+                manual_doc = _lookup_manual_doc_by_srl(
+                    cursor, doc_typ, doc_srl, target_phone, balances_by_cust
+                )
+            elif msg_typ == 1 and doc_typ is None and attch_str and target_phone:
+                norm_attch = os.path.normcase(attch_str)
+                if norm_attch in synced_pdf_paths:
+                    if not network_failed:
+                        max_advance_sr = sr_no
+                    continue
+                c_code, c_name, rem_bal = _lookup_customer_by_phone(cursor, target_phone, balances_by_cust)
+                bal_match = re.search(r"(-?\d+(?:\.\d+)?)", msg_txt)
+                parsed_amt = _parse_amount(bal_match.group(1), None) if bal_match else None
+                eff_bal = parsed_amt if parsed_amt is not None else (rem_bal if rem_bal is not None else 0.0)
+                manual_doc = {
+                    "invoice_number": f"ALRT-M-{sr_no}",
+                    "doc_type": "account_statement",
+                    "customer_code": c_code,
+                    "customer_name": c_name,
+                    "phone": target_phone,
+                    "invoice_date": dt_iso[:10] if len(dt_iso) >= 10 else datetime.now().strftime("%Y-%m-%d"),
+                    "amount": eff_bal,
+                    "currency": "ر.س",
+                    "remaining_balance": eff_bal,
+                    "payment_method": None,
+                    "onyx_form_code": "ALRTT002",
+                    "details": msg_txt or "كشف حساب ومطابقة عميل - شاشة ALRTT002",
+                    "_ad_ts": dt_iso,
+                    "force_auto_send": True,
+                }
+
+            if not manual_doc:
+                if not network_failed:
+                    max_advance_sr = sr_no
+                continue
+
+            if msg_txt and manual_doc.get("doc_type") == "purchase_order" and not manual_doc.get("details"):
+                manual_doc["details"] = msg_txt
+
+            pair_key = (manual_doc["invoice_number"], clean_phone_number(manual_doc["phone"]))
+            if pair_key in just_auto_sent_pairs:
+                if not network_failed:
+                    max_advance_sr = sr_no
+                continue
+
+            if attch_str:
+                manual_doc["_attch_path"] = attch_str
+                if not os.path.isfile(attch_str):
+                    time.sleep(1.5)
+            if pdf_index is None and active_pdf_dirs:
+                pdf_index = _build_pdf_index(active_pdf_dirs)
+            local_pdf = _find_local_onyx_pdf(manual_doc, pdf_index or [])
+            if local_pdf:
+                uploaded_url = upload_pdf_to_portal(
+                    upload_pdf_url, manual_doc["invoice_number"], local_pdf, api_key
+                )
+                if uploaded_url:
+                    manual_doc["attachment_url"] = uploaded_url
+                    manual_doc["_local_pdf_path"] = local_pdf
+                    handled_pdf_paths.add(os.path.normcase(local_pdf))
+            if (
+                manual_doc.get("doc_type") == "account_statement"
+                and manual_doc.get("onyx_form_code") == "ALRTT002"
+                and not manual_doc.get("attachment_url")
+            ):
+                manual_doc["doc_type"] = "direct_alert"
+
+            manual_doc["_sr_no"] = sr_no
+            docs_to_send.append(manual_doc)
+
+        if docs_to_send:
+            print(f"[+] زر الإرسال اليدوي من أونكس: جاري إرسال {len(docs_to_send)} عملية عبر البوابة...")
+            pushed = send_documents_to_portal(endpoint_url, docs_to_send, api_key)
+            if pushed > 0:
+                sent_count = pushed
+                max_advance_sr = max(max_advance_sr, *(int(d["_sr_no"]) for d in docs_to_send))
+            else:
+                network_failed = True
+
+        if not network_failed and max_advance_sr > last_sr:
+            set_sync_state("manual_send_cutoff_sr", str(max_advance_sr))
+
+        cursor.close()
+        conn.close()
+    except Exception as err:
+        print(f"  [!] تنبيه أثناء معالجة زر الإرسال اليدوي: {err}")
+
+    return sent_count
+
+
 def main():
     parser = argparse.ArgumentParser(description="Onyx Pro / OraNT Multi-Template Sync Tool")
     parser.add_argument("--discover", action="store_true", help="فحص وعرض أسماء الجداول الفعلية في قاعدة أوراكل")
@@ -1661,7 +2465,7 @@ def main():
 
     if args.refresh_balances:
         init_tracker_db()
-        docs = fetch_documents_from_oracle()
+        docs = fetch_documents_from_oracle(apply_cutoffs=False)
         refresh_docs = [
             doc for doc in docs
             if doc.get("remaining_balance") is not None and is_invoice_synced(doc["invoice_number"])
@@ -1734,6 +2538,8 @@ def main():
                     expects_pdf = doc_type in (
                         "cash_invoice",
                         "credit_invoice",
+                        "sales_return",
+                        "credit_sales_return",
                         "price_quotation",
                         "customer_discount_notice",
                         "account_statement",
@@ -1752,13 +2558,22 @@ def main():
                             f"({int(max(0, age_sec))}ث / {PDF_WAIT_SECONDS}ث)..."
                         )
                         continue
+                    if (
+                        doc_type == "account_statement"
+                        and doc.get("onyx_form_code") == "ALRTT002"
+                    ):
+                        doc["doc_type"] = "direct_alert"
                     ready_docs.append(doc)
+
+            just_auto_sent_pairs = {
+                (d["invoice_number"], clean_phone_number(d["phone"]))
+                for d in ready_docs
+                if not d.get("suppress_auto_send") and d.get("doc_type") != "purchase_order"
+            }
 
             if ready_docs:
                 print(f"[+] تم العثور على {len(ready_docs)} عملية جديدة للمزامنة.")
                 send_documents_to_portal(args.url, ready_docs, args.key)
-            elif deferred_count == 0:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] لا توجد عمليات جديدة.")
 
             late_uploaded = 0
             for doc in recent_missing_pdf_docs:
@@ -1773,6 +2588,19 @@ def main():
                     if uploaded_url:
                         mark_pdf_as_uploaded(doc["invoice_number"], local_pdf)
                         late_uploaded += 1
+
+            handled_pdf_paths = {os.path.normcase(p) for p in used_pdf_paths if p}
+            manual_sent = _process_manual_button_sends(
+                args.url,
+                args.upload_pdf_url,
+                args.key,
+                active_pdf_dirs,
+                handled_pdf_paths,
+                just_auto_sent_pairs,
+            )
+
+            if not ready_docs and manual_sent == 0 and deferred_count == 0:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] لا توجد عمليات جديدة.")
 
         if args.loop <= 0:
             break

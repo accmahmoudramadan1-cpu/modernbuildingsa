@@ -36,14 +36,24 @@ export function isWithinRecentDays(
   return diffMs <= maxDays * 86400 * 1000 && diffMs >= -2 * 86400 * 1000;
 }
 
-export function isAutoSendEligible(doc: AutoSendCandidate): boolean {
+export function isAutoSendEligible(
+  doc: AutoSendCandidate,
+  options?: { forceAutoSend?: boolean }
+): boolean {
   if (process.env.WHATSAPP_AUTO_SEND_ENABLED === "false") return false;
-  if (doc.status !== "pending") return false;
-  // Purchase orders must NEVER be auto-sent; user triggers them manually in the portal
-  if (doc.doc_type === "purchase_order") return false;
 
   const formattedPhone = formatPhoneNumber(doc.phone);
   if (!formattedPhone || formattedPhone.length < 9) return false;
+
+  // Explicit sends triggered by clicking Onyx's manual "Send" button (or manual portal send)
+  // bypass automatic-only restrictions (like PO suppression & 3-day recency window).
+  if (options?.forceAutoSend) {
+    return true;
+  }
+
+  if (doc.status !== "pending") return false;
+  // Purchase orders must NEVER auto-send passively on save; they send when the user clicks Send
+  if (doc.doc_type === "purchase_order") return false;
 
   const isAlrtt002 = doc.onyx_form_code === "ALRTT002";
   return isWithinRecentDays(doc.invoice_date, 3) || isAlrtt002;

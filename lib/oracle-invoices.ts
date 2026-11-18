@@ -249,9 +249,22 @@ function sanitizeNumeric(val: unknown, fallback: number | null): number | null {
  */
 export async function upsertOracleInvoices(
   incomingInvoices: Partial<OracleInvoice>[]
-): Promise<{ success: boolean; count: number; newlyInserted: OracleInvoice[]; error?: string }> {
+): Promise<{
+  success: boolean;
+  count: number;
+  newlyInserted: OracleInvoice[];
+  forceAutoSendNumbers: Set<string>;
+  suppressAutoSendNumbers: Set<string>;
+  error?: string;
+}> {
   if (!Array.isArray(incomingInvoices) || incomingInvoices.length === 0) {
-    return { success: true, count: 0, newlyInserted: [] };
+    return {
+      success: true,
+      count: 0,
+      newlyInserted: [],
+      forceAutoSendNumbers: new Set(),
+      suppressAutoSendNumbers: new Set(),
+    };
   }
 
   const now = new Date().toISOString();
@@ -277,13 +290,17 @@ export async function upsertOracleInvoices(
     updated_at: now,
   }));
 
-  // Deduplicate incoming batch by invoice_number and track any explicit force_auto_send flag
+  // Deduplicate incoming batch by invoice_number and track explicit force_auto_send / suppress_auto_send flags
   const forceAutoSendNumbers = new Set<string>();
+  const suppressAutoSendNumbers = new Set<string>();
   const dedupedMap = new Map<string, OracleInvoice>();
   incomingInvoices.forEach((raw, idx) => {
     const f = formattedRaw[idx];
     if ((raw as any)?.force_auto_send === true) {
       forceAutoSendNumbers.add(f.invoice_number);
+    }
+    if ((raw as any)?.suppress_auto_send === true) {
+      suppressAutoSendNumbers.add(f.invoice_number);
     }
     dedupedMap.set(f.invoice_number, f);
   });
@@ -335,11 +352,13 @@ export async function upsertOracleInvoices(
     const existing = existingMap.get(item.invoice_number);
     const forceAutoSend = forceAutoSendNumbers.has(item.invoice_number);
 
-    if (existing?.status === "sent") {
+    if (forceAutoSend) {
+      newlyInserted.push(item);
+    } else if (existing?.status === "sent") {
       item.status = "sent";
       item.whatsapp_message_id = existing.whatsapp_message_id ?? null;
       item.sent_at = existing.sent_at ?? null;
-    } else if (!existing || forceAutoSend) {
+    } else if (!existing) {
       newlyInserted.push(item);
     }
   }
@@ -407,7 +426,13 @@ export async function upsertOracleInvoices(
           memoryInvoicesCache.unshift(item);
         }
       }
-      return { success: true, count: formatted.length, newlyInserted };
+      return {
+        success: true,
+        count: formatted.length,
+        newlyInserted,
+        forceAutoSendNumbers,
+        suppressAutoSendNumbers,
+      };
     } catch (err: any) {
       console.warn("[OracleInvoices] MySQL upsert error, falling back to memory:", err?.message);
     }
@@ -425,7 +450,13 @@ export async function upsertOracleInvoices(
     }
   }
 
-  return { success: true, count: formatted.length, newlyInserted };
+  return {
+    success: true,
+    count: formatted.length,
+    newlyInserted,
+    forceAutoSendNumbers,
+    suppressAutoSendNumbers,
+  };
 }
 
 /**

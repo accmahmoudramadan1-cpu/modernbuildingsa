@@ -6,6 +6,8 @@ export const dynamic = "force-dynamic";
 const DOC_TYPE_ENGLISH_LABELS: Record<string, string> = {
   cash_invoice: "Cash Sales Invoice (SI-CASH)",
   credit_invoice: "Credit Sales Invoice (SI-CREDIT)",
+  sales_return: "Cash Sales Return Invoice (SR-CASH)",
+  credit_sales_return: "Credit Sales Return Invoice (SR-CREDIT)",
   receipt_voucher: "Receipt Voucher (RV)",
   account_statement: "Customer Account Statement (ALRTT002)",
   price_quotation: "Price Quotation (QT)",

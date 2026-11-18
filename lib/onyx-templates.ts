@@ -1,6 +1,8 @@
 export type OnyxDocType =
   | "cash_invoice"
   | "credit_invoice"
+  | "sales_return"
+  | "credit_sales_return"
   | "receipt_voucher"
   | "account_statement"
   | "price_quotation"
@@ -72,6 +74,35 @@ export const ONYX_TEMPLATES: Record<OnyxDocType, OnyxTemplateDefinition> = {
       { index: 4, key: "remaining_balance", label: "الرصيد المتبقي", placeholder: "5482.75 ر.س" },
     ],
   },
+  sales_return: {
+    id: "sales_return",
+    label: "مردود مبيعات نقدي",
+    shortLabel: "مردود نقدي",
+    defaultMetaTemplateName: "sales_return",
+    onyxScreenCode: "SR-CASH",
+    badgeColor: "bg-rose-50 text-rose-700 border-rose-200",
+    hasAttachment: true,
+    variables: [
+      { index: 1, key: "invoice_number", label: "رقم المردود", placeholder: "2601003165" },
+      { index: 2, key: "invoice_date", label: "تاريخ المردود", placeholder: "2026-11-17" },
+      { index: 3, key: "amount", label: "المبلغ", placeholder: "16.00 ر.س" },
+    ],
+  },
+  credit_sales_return: {
+    id: "credit_sales_return",
+    label: "مردود مبيعات آجل",
+    shortLabel: "مردود آجل",
+    defaultMetaTemplateName: "credit_sales_return",
+    onyxScreenCode: "SR-CREDIT",
+    badgeColor: "bg-pink-50 text-pink-700 border-pink-200",
+    hasAttachment: true,
+    variables: [
+      { index: 1, key: "invoice_number", label: "رقم المردود", placeholder: "2601003166" },
+      { index: 2, key: "invoice_date", label: "تاريخ المردود", placeholder: "2026-11-17" },
+      { index: 3, key: "amount", label: "مبلغ المردود", placeholder: "3887.19 ر.س" },
+      { index: 4, key: "remaining_balance", label: "الرصيد المتبقي", placeholder: "86792.00 ر.س" },
+    ],
+  },
   receipt_voucher: {
     id: "receipt_voucher",
     label: "سند قبض",
@@ -79,7 +110,7 @@ export const ONYX_TEMPLATES: Record<OnyxDocType, OnyxTemplateDefinition> = {
     defaultMetaTemplateName: "receipt_voucher",
     onyxScreenCode: "RV",
     badgeColor: "bg-teal-50 text-teal-700 border-teal-200",
-    hasAttachment: false,
+    hasAttachment: true,
     variables: [
       { index: 1, key: "amount", label: "المبلغ المستلم", placeholder: "1500.00 ر.س" },
       { index: 2, key: "payment_method", label: "طريقة الدفع", placeholder: "تحويل بنكي" },
@@ -150,7 +181,7 @@ export const ONYX_TEMPLATES: Record<OnyxDocType, OnyxTemplateDefinition> = {
     defaultMetaTemplateName: "direct_alert",
     onyxScreenCode: "ALRTT002",
     badgeColor: "bg-orange-50 text-orange-700 border-orange-200",
-    hasAttachment: true,
+    hasAttachment: false,
     variables: [
       { index: 1, key: "customer_name", label: "اسم العميل", placeholder: "مؤسسة المصباح المميز التجارية" },
       { index: 2, key: "details", label: "نص الرسالة / التنبيه", placeholder: "برجاء سداد المبالغ المستحقة" },
@@ -178,9 +209,17 @@ export function normalizePaymentMethod(method?: string | null): string | null {
 function formatAmountWithCurrency(
   value: number | string | null | undefined,
   currency: string = "ر.س",
-  includeCurrency: boolean = true
+  includeCurrency: boolean = true,
+  useAbsolute: boolean = false
 ): string {
-  const numStr = String(value ?? "0").trim();
+  let numStr = String(value ?? "0").trim();
+  if (useAbsolute) {
+    const cleaned = numStr.replace(/[^0-9.-]/g, "");
+    const parsed = Number(cleaned);
+    if (cleaned !== "" && Number.isFinite(parsed) && parsed < 0) {
+      numStr = numStr.replace(/^-/, "");
+    }
+  }
   if (!includeCurrency) return numStr;
   return numStr.includes(currency) || numStr.includes("ريال") || numStr.includes("SAR")
     ? numStr
@@ -199,6 +238,7 @@ export function extractTemplateParameters(
   const docNo = String(record.invoice_number || "").trim();
   const custName = String(record.customer_name || "عميلنا العزيز").trim();
   const amountWithCurr = formatAmountWithCurrency(record.amount, currency, true);
+  const amountAbsWithCurr = formatAmountWithCurrency(record.amount, currency, true, true);
   const amountRaw = formatAmountWithCurrency(record.amount, currency, false);
   const hasBalance =
     record.remaining_balance !== undefined &&
@@ -218,9 +258,15 @@ export function extractTemplateParameters(
     case "credit_invoice":
       return [docNo, dateVal, amountWithCurr, balanceVal];
 
+    case "sales_return":
+      return [docNo, dateVal, amountAbsWithCurr];
+
+    case "credit_sales_return":
+      return [docNo, dateVal, amountAbsWithCurr, balanceVal];
+
     case "receipt_voucher":
       return [
-        amountWithCurr,
+        amountAbsWithCurr,
         normalizePaymentMethod(record.payment_method) || "نقداً / تحويل بنكي",
         dateVal,
         balanceVal,
@@ -236,7 +282,7 @@ export function extractTemplateParameters(
       return [custName, docNo, dateVal];
 
     case "customer_discount_notice":
-      return [amountWithCurr, dateVal, balanceVal];
+      return [amountAbsWithCurr, dateVal, balanceVal];
 
     case "direct_alert":
       return [
@@ -276,6 +322,25 @@ export function formatTemplatePreviewText(
       return [
         "عميلنا العزيز",
         `مرفق لكم فاتورة مبيعات اجلة رقم (${p(0)})`,
+        `تاريخ الفاتورة (${p(1)})`,
+        `بمبلغ (${p(2)})`,
+        `الرصيد المتبقي (${p(3)})`,
+        "Modern Building",
+      ].join("\n");
+
+    case "sales_return":
+      return [
+        "عميلنا العزيز",
+        `مرفق لكم فاتورة مردود مبيعات نقدية رقم (${p(0)})`,
+        `تاريخ الفاتورة (${p(1)})`,
+        `بمبلغ (${p(2)})`,
+        "Modern Building",
+      ].join("\n");
+
+    case "credit_sales_return":
+      return [
+        "عميلنا العزيز",
+        `مرفق لكم فاتورة مردود مبيعات اجلة رقم (${p(0)})`,
         `تاريخ الفاتورة (${p(1)})`,
         `بمبلغ (${p(2)})`,
         `الرصيد المتبقي (${p(3)})`,

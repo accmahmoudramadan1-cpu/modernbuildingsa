@@ -87,11 +87,15 @@ export async function POST(request: NextRequest) {
     let autoFailedCount = 0;
 
     if (autoSendEnabled && result.newlyInserted.length > 0) {
-      const isBulkDump = result.newlyInserted.length > 15;
-      const eligibleDocs = result.newlyInserted.filter((doc) => {
-        if (!isAutoSendEligible(doc)) return false;
+      const nonSuppressed = result.newlyInserted.filter(
+        (doc) => !result.suppressAutoSendNumbers.has(doc.invoice_number)
+      );
+      const isBulkDump = nonSuppressed.length > 15;
+      const eligibleDocs = nonSuppressed.filter((doc) => {
+        const forceAutoSend = result.forceAutoSendNumbers.has(doc.invoice_number);
+        if (!isAutoSendEligible(doc, { forceAutoSend })) return false;
         if (isBulkDump) {
-          return doc.onyx_form_code === "ALRTT002";
+          return doc.onyx_form_code === "ALRTT002" || forceAutoSend;
         }
         return true;
       });
