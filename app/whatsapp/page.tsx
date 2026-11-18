@@ -317,7 +317,7 @@ export default function WhatsAppInvoicesPage() {
               </span>
               <div>
                 <h1 className="text-2xl font-black text-gray-900 sm:text-3xl">
-                  بوابة واتساب نظام أونكس (Onyx Pro / OraNT)
+                  بوابة واتساب
                 </h1>
                 <p className="text-sm font-semibold text-gray-500">
                   استقبال الفواتير، سندات القبض، كشوف الحساب، عروض الأسعار، طلبات الشراء وإشعارات العملاء
