@@ -1837,7 +1837,12 @@ def generate_mock_documents():
     ]
 
 
-def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = ""):
+def send_documents_to_portal(
+    endpoint_url: str,
+    docs_list: list,
+    api_key: str = "",
+    out_auto_sent: set = None,
+):
     """إرسال المستندات إلى منصة Modern Building عبر HTTP POST"""
     if not docs_list:
         print("[i] لا توجد مستندات جديدة للمزامنة.")
@@ -1864,6 +1869,10 @@ def send_documents_to_portal(endpoint_url: str, docs_list: list, api_key: str = 
             print(f"[نجاح] استجابة الخادم: {result.get('message', 'تمت المزامنة بنجاح')}")
             auto_sent = int(result.get("autoSentCount", 0) or 0)
             auto_failed = int(result.get("autoFailedCount", 0) or 0)
+            if out_auto_sent is not None:
+                out_auto_sent.update(
+                    str(x).strip() for x in (result.get("autoSentNumbers") or []) if x
+                )
             if auto_sent > 0:
                 print(f"  [واتساب] تم الإرسال التلقائي عبر واتساب لـ {auto_sent} عملية.")
             if auto_failed > 0:
@@ -2565,15 +2574,18 @@ def main():
                         doc["doc_type"] = "direct_alert"
                     ready_docs.append(doc)
 
+            auto_sent_numbers = set()
+            if ready_docs:
+                print(f"[+] تم العثور على {len(ready_docs)} عملية جديدة للمزامنة.")
+                send_documents_to_portal(
+                    args.url, ready_docs, args.key, out_auto_sent=auto_sent_numbers
+                )
+
             just_auto_sent_pairs = {
                 (d["invoice_number"], clean_phone_number(d["phone"]))
                 for d in ready_docs
-                if not d.get("suppress_auto_send") and d.get("doc_type") != "purchase_order"
+                if d["invoice_number"] in auto_sent_numbers
             }
-
-            if ready_docs:
-                print(f"[+] تم العثور على {len(ready_docs)} عملية جديدة للمزامنة.")
-                send_documents_to_portal(args.url, ready_docs, args.key)
 
             late_uploaded = 0
             for doc in recent_missing_pdf_docs:

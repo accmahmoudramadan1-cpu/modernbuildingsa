@@ -79,6 +79,10 @@ export async function autoDispatchOracleInvoice(doc: AutoSendCandidate): Promise
     }
   }
 
+  if (requiresOnyxPdf && !resolvedPdfUrl) {
+    return { outcome: "waiting_pdf" };
+  }
+
   const languageCode = process.env.WHATSAPP_INVOICE_TEMPLATE_LANG || "ar";
   const normalizedDoc = { ...doc, doc_type: templateDef.id };
   const bodyParameters = extractTemplateParameters(templateDef.id, normalizedDoc);

@@ -85,6 +85,7 @@ export async function POST(request: NextRequest) {
     const autoSendEnabled = process.env.WHATSAPP_AUTO_SEND_ENABLED !== "false";
     let autoSentCount = 0;
     let autoFailedCount = 0;
+    const autoSentNumbers: string[] = [];
 
     if (autoSendEnabled && result.newlyInserted.length > 0) {
       const nonSuppressed = result.newlyInserted.filter(
@@ -105,6 +106,7 @@ export async function POST(request: NextRequest) {
           const dispatch = await autoDispatchOracleInvoice(doc);
           if (dispatch.outcome === "sent") {
             autoSentCount += 1;
+            autoSentNumbers.push(doc.invoice_number);
           } else if (dispatch.outcome === "failed") {
             autoFailedCount += 1;
             console.warn(
@@ -128,6 +130,7 @@ export async function POST(request: NextRequest) {
       syncedCount: result.count,
       newlyInsertedCount: result.newlyInserted.length,
       autoSentCount,
+      autoSentNumbers,
       autoFailedCount,
     });
   } catch (error: any) {
