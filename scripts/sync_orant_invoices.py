@@ -360,15 +360,15 @@ ONYX_QUERIES = {
                 NULL AS ATTCH_PATH,
                 TO_CHAR(Q.QUOT_SER) AS DOC_SRL,
                 TO_CHAR(NVL(Q.APRV_DATE, Q.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
-                TO_CHAR(Q.AD_U_ID) AS AD_UID
+                TO_CHAR(NVL(Q.APRV_U_ID, Q.AD_U_ID)) AS AD_UID
             FROM QUOTATION Q
             LEFT JOIN CUSTOMER C ON C.C_CODE = Q.C_CODE
             LEFT JOIN IAS_CASH_CUSTMR CC ON CC.CUST_CODE = Q.C_CODE_CSH
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(Q.QUOT_CUR)
-            WHERE Q.QUOT_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
+            WHERE NVL(Q.APRV_DATE, Q.QUOT_DATE) >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
               AND NVL(TO_CHAR(Q.APPROVED), '0') IN ('1', 'Y', 'y')
               AND NVL(TO_CHAR(Q.INACTIVE), '0') NOT IN ('1', 'Y', 'y')
-            ORDER BY Q.QUOT_DATE DESC, Q.QUOT_NO DESC
+            ORDER BY NVL(Q.APRV_DATE, Q.QUOT_DATE) DESC, Q.QUOT_NO DESC
             """,
         ],
     },
@@ -1306,7 +1306,7 @@ def _find_local_onyx_pdf(doc: dict, pdf_index: list, used_paths: set = None):
                 if anchor_forms and form_no not in anchor_forms:
                     continue
                 delta = (pdf_dt - target_dt).total_seconds()
-                if -15 <= delta <= 180:
+                if -45 <= delta <= 180:
                     # Prefer PDFs created shortly AFTER document/print timestamp, smallest delta first
                     score = (0 if delta >= 0 else 1, abs(delta))
                     if best_score is None or score < best_score:
@@ -1503,7 +1503,7 @@ def _load_print_audit_map(cursor):
         cursor.execute(
             """
             SELECT FORM_NO, AUD_U_ID, TO_CHAR(AUD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
-                   TO_CHAR(DOC_NO), TO_CHAR(DOC_SRL)
+                   TO_CHAR(DOC_NO), TO_CHAR(DOC_SRL), REP_WHR
             FROM IAS_AUD_PRNT_REP
             WHERE AUD_DATE >= TRUNC(SYSDATE) - :days_back
               AND AUD_DATE IS NOT NULL
@@ -1511,7 +1511,7 @@ def _load_print_audit_map(cursor):
             """,
             {"days_back": SYNC_DAYS_BACK + 1},
         )
-        for form_val, uid_val, dt_val, doc_no_val, doc_srl_val in cursor.fetchall():
+        for form_val, uid_val, dt_val, doc_no_val, doc_srl_val, rep_whr_val in cursor.fetchall():
             if not dt_val or uid_val is None:
                 continue
             try:
@@ -1522,10 +1522,22 @@ def _load_print_audit_map(cursor):
                 continue
 
             entry = (form_no, uid, aud_dt)
+            keys_found = []
             for raw_k in (doc_no_val, doc_srl_val):
                 k = str(raw_k or "").strip().lower()
                 if k:
-                    events_by_key.setdefault(k, []).append(entry)
+                    keys_found.append(k)
+            if rep_whr_val:
+                for m in re.finditer(
+                    r"(?:quot_ser|quot_no|bill_ser|bill_no|rt_bill_ser|rt_bill_no|v_ser|voucher_no|po_ser|po_no|pr_ser|pr_no|doc_ser|doc_no)\s*=\s*'?(\d+)'?",
+                    str(rep_whr_val),
+                    re.IGNORECASE,
+                ):
+                    k = m.group(1).strip().lower()
+                    if k and k not in keys_found:
+                        keys_found.append(k)
+            for k in keys_found:
+                events_by_key.setdefault(k, []).append(entry)
     except Exception:
         pass
     return events_by_key
@@ -2517,7 +2529,8 @@ def main():
                 else:
                     pdf_uploaded = row[0]
                     age_sec = doc.get("_age_seconds")
-                    if not pdf_uploaded and age_sec is not None and -60 <= age_sec <= 86400:
+                    max_late_age = 259200 if doc.get("doc_type") == "price_quotation" else 86400
+                    if not pdf_uploaded and age_sec is not None and -60 <= age_sec <= max_late_age:
                         recent_missing_pdf_docs.append(doc)
 
             need_pdf_index = bool(pending_new_docs or recent_missing_pdf_docs) and (

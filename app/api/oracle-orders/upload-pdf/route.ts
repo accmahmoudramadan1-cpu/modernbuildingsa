@@ -103,7 +103,7 @@ export async function POST(request: NextRequest) {
       const invRows = await queryRows<any>(
         `SELECT invoice_number, doc_type, customer_name, phone, invoice_date, amount,
                 currency, remaining_balance, payment_method, attachment_url,
-                onyx_form_code, details, status
+                onyx_form_code, details, status, created_at
          FROM oracle_invoices
          WHERE invoice_number = ?
          LIMIT 1`,

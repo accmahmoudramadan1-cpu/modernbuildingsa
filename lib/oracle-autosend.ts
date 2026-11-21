@@ -22,14 +22,15 @@ export interface AutoSendCandidate {
   onyx_form_code?: string | null;
   details?: string;
   status: string;
+  created_at?: string | Date | null;
 }
 
 export function isWithinRecentDays(
-  dateStr: string | undefined | null,
+  dateStr: string | Date | undefined | null,
   maxDays: number
 ): boolean {
   if (!dateStr) return true;
-  const parsed = Date.parse(dateStr);
+  const parsed = dateStr instanceof Date ? dateStr.getTime() : Date.parse(String(dateStr));
   if (Number.isNaN(parsed)) return false;
   // Allow +2 days buffer for timezone ahead of UTC (e.g. KSA UTC+3)
   const diffMs = Date.now() - parsed;
@@ -56,7 +57,11 @@ export function isAutoSendEligible(
   if (doc.doc_type === "purchase_order") return false;
 
   const isAlrtt002 = doc.onyx_form_code === "ALRTT002";
-  return isWithinRecentDays(doc.invoice_date, 3) || isAlrtt002;
+  const isApprovedQuotationRecent =
+    doc.doc_type === "price_quotation" &&
+    Boolean(doc.created_at) &&
+    isWithinRecentDays(doc.created_at, 3);
+  return isWithinRecentDays(doc.invoice_date, 3) || isAlrtt002 || isApprovedQuotationRecent;
 }
 
 /**
