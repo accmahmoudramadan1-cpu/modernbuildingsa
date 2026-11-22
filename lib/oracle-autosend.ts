@@ -53,8 +53,8 @@ export function isAutoSendEligible(
   }
 
   if (doc.status !== "pending") return false;
-  // Purchase orders must NEVER auto-send passively on save; they send when the user clicks Send
-  if (doc.doc_type === "purchase_order") return false;
+  // Purchase orders auto-send once Onyx has exported and attached an authentic PDF
+  if (doc.doc_type === "purchase_order" && !doc.attachment_url?.trim()) return false;
 
   const isAlrtt002 = doc.onyx_form_code === "ALRTT002";
   const isApprovedQuotationRecent =
