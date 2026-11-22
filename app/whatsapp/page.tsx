@@ -31,6 +31,10 @@ import {
   getOnyxTemplate,
   type OnyxDocType,
 } from "@/lib/onyx-templates";
+import {
+  formatWhatsAppFailureBannerText,
+  translateWhatsAppFailureToArabic,
+} from "@/lib/whatsapp-errors";
 
 interface OracleInvoice {
   id: string;
@@ -49,6 +53,7 @@ interface OracleInvoice {
   details?: string;
   status: "pending" | "sent" | "failed";
   whatsapp_message_id?: string | null;
+  failure_reason?: string | null;
   sent_at?: string | null;
   created_at: string;
 }
@@ -76,6 +81,8 @@ export default function WhatsAppInvoicesPage() {
   const [parameters, setParameters] = useState<string[]>([]);
   const [headerUrl, setHeaderUrl] = useState("");
   const [sending, setSending] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [selectedFailureInvoice, setSelectedFailureInvoice] = useState<OracleInvoice | null>(null);
 
   const [actionMessage, setActionMessage] = useState<{
     type: "success" | "error";
@@ -163,6 +170,7 @@ export default function WhatsAppInvoicesPage() {
     setTemplateName(templateDef.defaultMetaTemplateName);
     setHeaderUrl(inv.attachment_url || "");
     setParameters(extractTemplateParameters(templateDef.id, inv));
+    setModalError(null);
     setActionMessage(null);
   }
 
@@ -179,6 +187,7 @@ export default function WhatsAppInvoicesPage() {
   async function handleSendTemplate() {
     if (!selectedInvoice) return;
     setSending(true);
+    setModalError(null);
     setActionMessage(null);
 
     try {
@@ -226,24 +235,45 @@ export default function WhatsAppInvoicesPage() {
                   ...item,
                   status: "sent",
                   whatsapp_message_id: result.messageId,
+                  failure_reason: null,
                   sent_at: new Date().toISOString(),
                 }
               : item
           )
         );
 
+        setModalError(null);
         setSelectedInvoice(null);
       } else {
-        setActionMessage({
-          type: "error",
-          text: `فشل الإرسال: ${result.error || "تأكد من اعتماد القالب ومفتاح Meta في السيرفر"}`,
+        const rawErr = result.rawError || result.error || "";
+        const formattedErr = formatWhatsAppFailureBannerText(rawErr, {
+          phone: selectedInvoice.phone,
+          docTypeLabel: getOnyxTemplate(activeDocType).label,
         });
+        setModalError(formattedErr);
+
+        const missingPdf = Boolean(result?.details?.missingMandatoryPdfHeader);
+        if (!missingPdf && selectedInvoice.status !== "sent" && res.status >= 500) {
+          setInvoices((prev) =>
+            prev.map((item) =>
+              item.invoice_number === selectedInvoice.invoice_number
+                ? {
+                    ...item,
+                    status: "failed",
+                    failure_reason: rawErr || formattedErr,
+                  }
+                : item
+            )
+          );
+        }
       }
     } catch (error: any) {
-      setActionMessage({
-        type: "error",
-        text: `حدث خطأ أثناء محاولة الإرسال: ${error?.message || error}`,
-      });
+      setModalError(
+        formatWhatsAppFailureBannerText(error?.message || String(error), {
+          phone: selectedInvoice.phone,
+          docTypeLabel: getOnyxTemplate(activeDocType).label,
+        })
+      );
     } finally {
       setSending(false);
     }
@@ -640,10 +670,16 @@ export default function WhatsAppInvoicesPage() {
                               تم الإرسال
                             </span>
                           ) : inv.status === "failed" ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-3 py-1 text-xs font-bold text-red-700">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedFailureInvoice(inv)}
+                              title="اضغط لعرض سبب فشل الإرسال"
+                              className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-red-200 bg-red-50 px-3 py-1 text-xs font-bold text-red-700 transition hover:border-red-300 hover:bg-red-100"
+                            >
                               <span className="h-2 w-2 rounded-full bg-red-500"></span>
-                              فشل الإرسال
-                            </span>
+                              <span>فشل الإرسال</span>
+                              <span className="rounded bg-red-100 px-1 text-[10px] font-black text-red-600">؟</span>
+                            </button>
                           ) : (
                             <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">
                               <span className="h-2 w-2 rounded-full bg-amber-500"></span>
@@ -710,7 +746,11 @@ export default function WhatsAppInvoicesPage() {
                 </div>
               </div>
               <button
-                onClick={() => setSelectedInvoice(null)}
+                type="button"
+                onClick={() => {
+                  setSelectedInvoice(null);
+                  setModalError(null);
+                }}
                 className="rounded-xl p-2 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
               >
                 <CloseIcon className="h-4 w-4" />
@@ -905,16 +945,39 @@ export default function WhatsAppInvoicesPage() {
               </div>
             </div>
 
+            {/* Modal Error Banner */}
+            {modalError && (
+              <div className="mx-6 mb-3 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 shadow-sm">
+                <AlertCircleIcon className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+                <div className="min-w-0 flex-1 whitespace-pre-wrap leading-relaxed font-semibold">
+                  {modalError}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setModalError(null)}
+                  className="shrink-0 rounded-lg p-1 text-red-400 transition hover:bg-red-100 hover:text-red-700"
+                  aria-label="إغلاق رسالة الخطأ"
+                >
+                  <CloseIcon className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Modal Footer */}
             <div className="flex items-center justify-between border-t border-gray-100 bg-[#fbfbfa] px-6 py-4">
               <button
-                onClick={() => setSelectedInvoice(null)}
+                type="button"
+                onClick={() => {
+                  setSelectedInvoice(null);
+                  setModalError(null);
+                }}
                 className="rounded-xl px-5 py-2.5 text-xs font-bold text-gray-500 hover:bg-gray-100"
               >
                 إلغاء
               </button>
 
               <button
+                type="button"
                 onClick={handleSendTemplate}
                 disabled={sending}
                 className="flex items-center gap-2 rounded-xl bg-green-600 px-6 py-2.5 text-xs font-black text-white shadow-md transition hover:bg-green-700 disabled:opacity-50"
@@ -935,6 +998,118 @@ export default function WhatsAppInvoicesPage() {
           </div>
         </div>
       )}
+
+      {/* Failure Details Modal */}
+      {selectedFailureInvoice && (() => {
+        const docTemplate = getOnyxTemplate(selectedFailureInvoice.doc_type);
+        const failure = translateWhatsAppFailureToArabic(selectedFailureInvoice.failure_reason, {
+          phone: selectedFailureInvoice.phone,
+          docTypeLabel: docTemplate.label,
+        });
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+            onClick={() => setSelectedFailureInvoice(null)}
+          >
+            <div
+              className="w-full max-w-lg overflow-hidden rounded-3xl bg-white shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-red-100 bg-red-50/70 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+                    <AlertCircleIcon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-gray-900">تفاصيل فشل الإرسال</h3>
+                    <p className="text-xs font-medium text-gray-600">
+                      {docTemplate.label} • مستند رقم:{" "}
+                      <span className="font-mono font-bold text-gray-900">{selectedFailureInvoice.invoice_number}</span>
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFailureInvoice(null)}
+                  className="rounded-xl p-2 text-gray-400 transition hover:bg-white hover:text-gray-700"
+                  aria-label="إغلاق"
+                >
+                  <CloseIcon className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="max-h-[75vh] space-y-4 overflow-y-auto px-6 py-5">
+                {/* Customer & Phone Info */}
+                <div className="grid grid-cols-1 gap-2.5 rounded-2xl border border-gray-100 bg-gray-50/80 p-3.5 text-xs sm:grid-cols-2">
+                  <div>
+                    <span className="block text-[11px] font-semibold text-gray-400">العميل / الجهة</span>
+                    <span className="mt-0.5 block font-bold text-gray-900">
+                      {selectedFailureInvoice.customer_name || "غير محدد"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="block text-[11px] font-semibold text-gray-400">رقم الهاتف المسجل</span>
+                    <span dir="ltr" className="mt-0.5 inline-block font-mono font-bold text-gray-900">
+                      {selectedFailureInvoice.phone || "غير متوفر"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Arabic Reason */}
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                  <div className="text-sm font-black text-red-900">{failure.title}</div>
+                  <p className="mt-1.5 text-xs leading-relaxed font-medium text-red-800">{failure.reason}</p>
+                </div>
+
+                {/* Actionable Hint */}
+                {failure.hint && (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4">
+                    <div className="text-xs font-black text-amber-900">الحل المقترح</div>
+                    <p className="mt-1 text-xs leading-relaxed font-medium text-amber-800">{failure.hint}</p>
+                  </div>
+                )}
+
+                {/* Technical Raw Message */}
+                {failure.raw && (
+                  <div className="rounded-2xl border border-gray-200 bg-gray-50 p-3.5">
+                    <div className="mb-1 text-[11px] font-bold text-gray-500">التفاصيل التقنية من الخادم / Meta</div>
+                    <pre dir="ltr" className="max-h-28 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-gray-700">
+                      {failure.raw}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="flex items-center justify-between gap-3 border-t border-gray-100 bg-[#fbfbfa] px-6 py-4">
+                <button
+                  type="button"
+                  onClick={() => setSelectedFailureInvoice(null)}
+                  className="rounded-xl px-5 py-2.5 text-xs font-bold text-gray-600 transition hover:bg-gray-100"
+                >
+                  إغلاق
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = selectedFailureInvoice;
+                    setSelectedFailureInvoice(null);
+                    openSendModal(target);
+                  }}
+                  className="flex items-center gap-2 rounded-xl bg-green-600 px-5 py-2.5 text-xs font-black text-white shadow-md transition hover:bg-green-700"
+                >
+                  <SendPlaneIcon className="h-4 w-4" />
+                  <span>فتح نافذة الإرسال وإعادة المحاولة</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </main>
   );
 }

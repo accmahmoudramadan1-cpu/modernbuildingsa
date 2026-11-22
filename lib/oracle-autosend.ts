@@ -117,13 +117,19 @@ export async function autoDispatchOracleInvoice(doc: AutoSendCandidate): Promise
     return { outcome: "waiting_pdf" };
   }
 
+  const failureReason =
+    typeof sendRes.error === "string"
+      ? sendRes.error
+      : JSON.stringify(sendRes.error || "Unknown WhatsApp API error");
+
   await updateInvoiceWhatsAppStatus({
     invoiceNumber: doc.invoice_number,
     status: "failed",
+    failureReason,
   });
 
   return {
     outcome: "failed",
-    error: typeof sendRes.error === "string" ? sendRes.error : JSON.stringify(sendRes.error),
+    error: failureReason,
   };
 }

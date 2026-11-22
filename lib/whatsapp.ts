@@ -2,11 +2,23 @@
  * Helper utility for Meta WhatsApp Cloud API
  */
 import { formatPhoneNumber } from "@/lib/whatsapp-phone";
+import { diagnosePhoneFormatIssue } from "@/lib/whatsapp-errors";
 import { recordWhatsAppMessage } from "@/lib/whatsapp-inbox";
 import {
   extractOraclePdfInvoiceNumber,
   getRepairedOnyxPdf,
 } from "@/lib/oracle-pdfs";
+
+function validateRecipientPhone(to: string): { recipient?: string; error?: string } {
+  const recipient = formatPhoneNumber(to);
+  const issue = diagnosePhoneFormatIssue(recipient || to);
+  if (issue || !recipient) {
+    return {
+      error: `${issue || `رقم الهاتف غير صالح: ${to}`} [invalid_phone_format]`,
+    };
+  }
+  return { recipient };
+}
 
 async function resolveTemplateDocumentMediaId(
   headerUrl: string,
@@ -149,10 +161,11 @@ export async function sendWhatsAppMessage(
     return { success: false, error: "Missing WhatsApp credentials" };
   }
 
-  const recipient = formatPhoneNumber(to);
-  if (!recipient) {
-    return { success: false, error: "Invalid phone number" };
+  const phoneCheck = validateRecipientPhone(to);
+  if (!phoneCheck.recipient) {
+    return { success: false, error: phoneCheck.error || "Invalid phone number" };
   }
+  const recipient = phoneCheck.recipient;
 
   const payload: WhatsAppTextMessagePayload = {
     messaging_product: "whatsapp",
@@ -258,13 +271,14 @@ export async function sendWhatsAppTemplate({
     };
   }
 
-  const recipient = formatPhoneNumber(to);
-  if (!recipient || recipient.length < 9) {
+  const phoneCheck = validateRecipientPhone(to);
+  if (!phoneCheck.recipient) {
     return {
       success: false,
-      error: `رقم الهاتف غير صالح: ${to}`,
+      error: phoneCheck.error || `رقم الهاتف غير صالح: ${to}`,
     };
   }
+  const recipient = phoneCheck.recipient;
 
   const resolvedFilename = documentFilename || `${templateName}_${recipient}.pdf`;
 
@@ -520,10 +534,11 @@ export async function sendWhatsAppMedia(params: {
     return { success: false, error: "Missing WhatsApp credentials" };
   }
 
-  const recipient = formatPhoneNumber(params.to);
-  if (!recipient) {
-    return { success: false, error: "Invalid phone number" };
+  const phoneCheck = validateRecipientPhone(params.to);
+  if (!phoneCheck.recipient) {
+    return { success: false, error: phoneCheck.error || "Invalid phone number" };
   }
+  const recipient = phoneCheck.recipient;
 
   const mediaObject: Record<string, any> = params.metaMediaId
     ? { id: params.metaMediaId }

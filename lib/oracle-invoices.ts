@@ -19,6 +19,7 @@ export interface OracleInvoice {
   details?: string;
   status: "pending" | "sent" | "failed";
   whatsapp_message_id?: string | null;
+  failure_reason?: string | null;
   sent_at?: string | null;
   created_at: string;
   updated_at?: string;
@@ -194,10 +195,12 @@ export async function getOracleInvoices(): Promise<OracleInvoice[]> {
         `SELECT o.id, o.invoice_number, o.doc_type, o.customer_code, o.customer_name, o.phone,
                 o.invoice_date, o.amount, o.currency, o.remaining_balance, o.payment_method,
                 o.attachment_url, o.onyx_form_code, o.details, o.status, o.whatsapp_message_id,
+                COALESCE(NULLIF(o.failure_reason, ''), m.error_text) AS failure_reason,
                 o.sent_at, o.created_at, o.updated_at,
                 (p.invoice_number IS NOT NULL) AS has_pdf_blob
          FROM oracle_invoices o
          LEFT JOIN oracle_pdfs p ON p.invoice_number = o.invoice_number
+         LEFT JOIN whatsapp_messages m ON m.wa_message_id = o.whatsapp_message_id
          ORDER BY o.created_at DESC`
       );
       if (rows.length > 0) {
@@ -389,6 +392,7 @@ export async function upsertOracleInvoices(
              details = VALUES(details),
              status = IF(status = 'sent', 'sent', VALUES(status)),
              whatsapp_message_id = IF(status = 'sent', whatsapp_message_id, VALUES(whatsapp_message_id)),
+             failure_reason = IF(status = 'sent', NULL, IF(VALUES(status) = 'pending', NULL, failure_reason)),
              sent_at = IF(status = 'sent', sent_at, VALUES(sent_at)),
              updated_at = VALUES(updated_at)`,
           [
@@ -466,12 +470,16 @@ export async function updateInvoiceWhatsAppStatus({
   invoiceNumber,
   status,
   messageId,
+  failureReason,
 }: {
   invoiceNumber: string;
   status: "sent" | "failed" | "pending";
   messageId?: string;
+  failureReason?: string | null;
 }): Promise<boolean> {
   const now = new Date().toISOString();
+  const resolvedFailureReason =
+    status === "failed" ? (failureReason ? String(failureReason).trim() : null) : null;
 
   if (isMysqlConfigured()) {
     try {
@@ -479,21 +487,33 @@ export async function updateInvoiceWhatsAppStatus({
         `UPDATE oracle_invoices
          SET status = ?,
              whatsapp_message_id = ?,
+             failure_reason = ${status === "failed" ? "COALESCE(?, failure_reason)" : "NULL"},
              sent_at = ?,
              updated_at = ?
          WHERE invoice_number = ?`,
-        [
-          status,
-          messageId || null,
-          status === "sent" ? now : null,
-          toMysqlDateTime(now),
-          invoiceNumber,
-        ]
+        status === "failed"
+          ? [
+              status,
+              messageId || null,
+              resolvedFailureReason,
+              null,
+              toMysqlDateTime(now),
+              invoiceNumber,
+            ]
+          : [
+              status,
+              messageId || null,
+              status === "sent" ? now : null,
+              toMysqlDateTime(now),
+              invoiceNumber,
+            ]
       );
       const item = memoryInvoicesCache.find((x) => x.invoice_number === invoiceNumber);
       if (item) {
         item.status = status;
         item.whatsapp_message_id = messageId || null;
+        item.failure_reason =
+          status === "failed" ? (resolvedFailureReason ?? item.failure_reason ?? null) : null;
         item.sent_at = status === "sent" ? now : null;
       }
       return true;
@@ -507,6 +527,8 @@ export async function updateInvoiceWhatsAppStatus({
   if (item) {
     item.status = status;
     item.whatsapp_message_id = messageId || null;
+    item.failure_reason =
+      status === "failed" ? (resolvedFailureReason ?? item.failure_reason ?? null) : null;
     item.sent_at = status === "sent" ? now : null;
     return true;
   }

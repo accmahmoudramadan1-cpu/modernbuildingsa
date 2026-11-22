@@ -188,8 +188,19 @@ export async function POST(request: NextRequest) {
           console.log(`[WhatsApp Webhook] Status batch (${value.statuses.length}): ${summary}`);
           for (const st of value.statuses) {
             if (!st?.id || !st?.status) continue;
-            const errMsg = st.errors?.[0]
-              ? String(st.errors[0].error_data?.details || st.errors[0].message || st.errors[0].title || "")
+            const errObj = st.errors?.[0];
+            const errMsg = errObj
+              ? [
+                  String(
+                    errObj.error_data?.details ||
+                      errObj.message ||
+                      errObj.title ||
+                      "WhatsApp delivery failed"
+                  ),
+                  errObj.code !== undefined ? `[code: ${errObj.code}]` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")
               : null;
             await updateWhatsAppMessageStatus({
               waMessageId: String(st.id),

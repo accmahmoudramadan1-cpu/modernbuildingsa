@@ -129,11 +129,24 @@ export async function ensureMysqlSchema(): Promise<void> {
           details TEXT NULL,
           status VARCHAR(30) DEFAULT 'pending',
           whatsapp_message_id VARCHAR(255) NULL,
+          failure_reason TEXT NULL,
           sent_at VARCHAR(40) NULL,
           created_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3),
           updated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `);
+      const [colRows] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS cnt
+         FROM INFORMATION_SCHEMA.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE()
+           AND TABLE_NAME = 'oracle_invoices'
+           AND COLUMN_NAME = 'failure_reason'`
+      );
+      if (Number(colRows[0]?.cnt || 0) === 0) {
+        await pool.query(
+          `ALTER TABLE oracle_invoices ADD COLUMN failure_reason TEXT NULL AFTER whatsapp_message_id`
+        );
+      }
       await pool.query(`
         CREATE TABLE IF NOT EXISTS oracle_pdfs (
           invoice_number VARCHAR(100) PRIMARY KEY,

@@ -12,6 +12,7 @@ import {
   getOnyxTemplate,
   type OnyxDocType,
 } from "@/lib/onyx-templates";
+import { formatWhatsAppFailureBannerText } from "@/lib/whatsapp-errors";
 import { getWhatsAppSession } from "@/lib/whatsapp-auth";
 import { getAdminSession } from "@/lib/admin-auth";
 
@@ -176,16 +177,6 @@ export async function POST(request: NextRequest) {
           : `تم إرسال (${templateDef.label}) بدون ملف PDF بنجاح.`,
       });
     } else {
-      if (
-        !(result as any).missingMandatoryPdfHeader &&
-        authoritativeInvoice?.status !== "sent"
-      ) {
-        await updateInvoiceWhatsAppStatus({
-          invoiceNumber,
-          status: "failed",
-        });
-      }
-
       const errorMessage =
         typeof result.error === "string"
           ? result.error
@@ -193,10 +184,27 @@ export async function POST(request: NextRequest) {
             result.error?.message ||
             "فشل إرسال رسالة الواتساب عبر مزود الخدمة.";
 
+      if (
+        !(result as any).missingMandatoryPdfHeader &&
+        authoritativeInvoice?.status !== "sent"
+      ) {
+        await updateInvoiceWhatsAppStatus({
+          invoiceNumber,
+          status: "failed",
+          failureReason: errorMessage,
+        });
+      }
+
+      const arabicError = formatWhatsAppFailureBannerText(errorMessage, {
+        phone: String(phone),
+        docTypeLabel: templateDef.label,
+      });
+
       return NextResponse.json(
         {
           success: false,
-          error: errorMessage,
+          error: arabicError,
+          rawError: errorMessage,
           details: result,
         },
         { status: 502 }

@@ -369,8 +369,12 @@ export async function updateWhatsAppMessageStatus(params: {
 
     if (normalizedStatus === "failed") {
       await executeSql(
-        `UPDATE oracle_invoices SET status = 'failed', updated_at = NOW(3) WHERE whatsapp_message_id = ?`,
-        [params.waMessageId]
+        `UPDATE oracle_invoices
+         SET status = 'failed',
+             failure_reason = COALESCE(?, failure_reason),
+             updated_at = NOW(3)
+         WHERE whatsapp_message_id = ?`,
+        [params.errorText || null, params.waMessageId]
       ).catch(() => {});
     }
   } catch (err) {
