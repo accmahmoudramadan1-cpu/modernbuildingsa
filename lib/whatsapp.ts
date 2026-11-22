@@ -3,6 +3,62 @@
  */
 import { formatPhoneNumber } from "@/lib/whatsapp-phone";
 import { recordWhatsAppMessage } from "@/lib/whatsapp-inbox";
+import {
+  extractOraclePdfInvoiceNumber,
+  getRepairedOnyxPdf,
+} from "@/lib/oracle-pdfs";
+
+async function resolveTemplateDocumentMediaId(
+  headerUrl: string,
+  filename: string
+): Promise<string | undefined> {
+  try {
+    let buffer: Buffer | null = null;
+    let mimeType = "application/pdf";
+
+    const invoiceNumber = extractOraclePdfInvoiceNumber(headerUrl);
+    if (invoiceNumber) {
+      const repaired = await getRepairedOnyxPdf(invoiceNumber);
+      if (repaired) {
+        buffer = repaired.buffer;
+        mimeType = repaired.mimeType;
+      }
+    } else if (/^https?:\/\//i.test(headerUrl)) {
+      const res = await fetch(headerUrl, {
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        const arrBuf = await res.arrayBuffer();
+        if (arrBuf.byteLength > 0) {
+          buffer = Buffer.from(arrBuf);
+          const ct = res.headers.get("content-type");
+          if (ct) mimeType = ct.split(";")[0].trim() || mimeType;
+        }
+      }
+    }
+
+    if (!buffer || buffer.length === 0) return undefined;
+
+    const uploadRes = await uploadMediaToMeta({ buffer, mimeType, filename });
+    if (uploadRes.success && uploadRes.mediaId) {
+      console.log(
+        `[WhatsApp Template] Pre-uploaded "${filename}" (${buffer.length} bytes) to Meta media_id=${uploadRes.mediaId}`
+      );
+      return uploadRes.mediaId;
+    }
+
+    console.warn(
+      `[WhatsApp Template] Meta media upload failed for "${filename}", falling back to link: ${uploadRes.error || "unknown"}`
+    );
+    return undefined;
+  } catch (err: any) {
+    console.warn(
+      `[WhatsApp Template] Direct media upload error for "${filename}":`,
+      err?.message || err
+    );
+    return undefined;
+  }
+}
 
 export { formatPhoneNumber };
 
@@ -210,18 +266,27 @@ export async function sendWhatsAppTemplate({
     };
   }
 
-  const buildComponents = (docHeaderUrl?: string): WhatsAppTemplateComponent[] => {
+  const resolvedFilename = documentFilename || `${templateName}_${recipient}.pdf`;
+
+  const buildComponents = (
+    docHeader?: { id?: string; link?: string }
+  ): WhatsAppTemplateComponent[] => {
     const components: WhatsAppTemplateComponent[] = [];
-    if (docHeaderUrl) {
+    if (docHeader && (docHeader.id || docHeader.link)) {
       components.push({
         type: "header",
         parameters: [
           {
             type: "document",
-            document: {
-              link: docHeaderUrl,
-              filename: documentFilename || `${templateName}_${recipient}.pdf`,
-            },
+            document: docHeader.id
+              ? {
+                  id: docHeader.id,
+                  filename: resolvedFilename,
+                }
+              : {
+                  link: docHeader.link,
+                  filename: resolvedFilename,
+                },
           },
         ],
       });
@@ -273,13 +338,29 @@ export async function sendWhatsAppTemplate({
     const cleanHeaderUrl = headerUrl ? String(headerUrl).trim() : "";
 
     let usedUrl: string | undefined = cleanHeaderUrl || undefined;
-    let attempt = await postTemplate(buildComponents(usedUrl));
+    let usedMediaId: string | undefined;
+
+    if (cleanHeaderUrl) {
+      usedMediaId = await resolveTemplateDocumentMediaId(
+        cleanHeaderUrl,
+        resolvedFilename
+      );
+    }
+
+    const docHeader = usedMediaId
+      ? { id: usedMediaId }
+      : usedUrl
+        ? { link: usedUrl }
+        : undefined;
+
+    let attempt = await postTemplate(buildComponents(docHeader));
 
     if (!attempt.ok && cleanHeaderUrl && isTemplateHeaderMismatchError(attempt.data)) {
       console.warn(
         `[WhatsApp Template] "${templateName}" rejected headerUrl (still BODY-only in Meta). Retrying without header...`
       );
       usedUrl = undefined;
+      usedMediaId = undefined;
       attempt = await postTemplate(buildComponents(undefined));
     } else if (!attempt.ok && !cleanHeaderUrl && isTemplateHeaderMismatchError(attempt.data)) {
       return {
@@ -300,6 +381,7 @@ export async function sendWhatsAppTemplate({
       previewText ||
       (bodyParameters.length > 0 ? `[${templateName}] ${bodyParameters.join(" | ")}` : `[${templateName}]`);
 
+    const hasDoc = Boolean(usedUrl || usedMediaId);
     const recorded = await recordWhatsAppMessage({
       phone: recipient,
       customerName,
@@ -307,9 +389,10 @@ export async function sendWhatsAppTemplate({
       direction: "out",
       msgType: "template",
       body: bodySummary,
+      mediaId: usedMediaId || null,
       mediaUrl: usedUrl || null,
-      mediaMime: usedUrl ? "application/pdf" : null,
-      mediaFilename: usedUrl ? documentFilename || `${templateName}.pdf` : null,
+      mediaMime: hasDoc ? "application/pdf" : null,
+      mediaFilename: hasDoc ? documentFilename || `${templateName}.pdf` : null,
       templateName,
       status: "sent",
     });
