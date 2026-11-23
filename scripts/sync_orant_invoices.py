@@ -392,8 +392,8 @@ ONYX_QUERIES = {
                 NVL(A.PR_DESC, A.SIDE_REQ) AS DETAILS,
                 NULL AS ATTCH_PATH,
                 TO_CHAR(A.PR_SER) AS DOC_SRL,
-                TO_CHAR(A.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
-                TO_CHAR(A.AD_U_ID) AS AD_UID
+                TO_CHAR(NVL(A.APRV_DATE, A.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(NVL(A.APRV_U_ID, A.AD_U_ID)) AS AD_UID
             FROM P_REQUEST A
             LEFT JOIN V_DETAILS B ON B.V_CODE = A.V_CODE
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(A.A_CY)
@@ -436,8 +436,8 @@ ONYX_QUERIES = {
                 P.PO_DESC AS DETAILS,
                 NULL AS ATTCH_PATH,
                 TO_CHAR(P.PO_SER) AS DOC_SRL,
-                TO_CHAR(P.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
-                TO_CHAR(P.AD_U_ID) AS AD_UID
+                TO_CHAR(NVL(P.APRV_DATE, P.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS') AS AD_TS,
+                TO_CHAR(NVL(P.APRV_U_ID, P.AD_U_ID)) AS AD_UID
             FROM P_ORDER P
             LEFT JOIN V_DETAILS V ON V.V_CODE = P.V_CODE
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(P.CUR_CODE)
@@ -464,22 +464,40 @@ ONYX_QUERIES = {
                     NULLIF(TRIM(CC.TEL_NO), '')
                 ) AS PHONE,
                 TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                CASE
-                    WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
-                        THEN COALESCE(
-                            NULLIF(ROUND(
-                                DECODE(NVL(N.ADD_DISC_TYPE, 0),
-                                    2, NVL(N.ADD_DISC_AMT_DTL, 0) + NVL(N.ADD_VAT_AMT, 0),
-                                    DECODE(NVL(N.CLC_VAT_PRICE_TYP, 0),
-                                        2, NVL(N.ADD_DISC_AMT_MST_VAT, 0),
-                                        NVL(N.ADD_DISC_AMT_MST, 0) + NVL(N.ADD_VAT_AMT, 0)
-                                    )
-                                ), 2
-                            ), 0),
-                            ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
-                        )
-                    ELSE ROUND(SUM(NVL(B.ADD_DISCOUNT, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
-                END AS AMOUNT,
+                COALESCE(
+                    NULLIF(
+                        (
+                            SELECT ROUND(SUM(ABS(NVL(P.AMT, 0))), 2)
+                            FROM IAS_POST_DTL P
+                            WHERE P.DOC_SER = N.DOC_SER
+                              AND P.AC_DTL_TYP = 3
+                              AND P.AC_CODE_DTL = TO_CHAR(COALESCE(N.C_CODE, B.C_CODE))
+                        ),
+                        0
+                    ),
+                    CASE
+                        WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
+                            THEN ROUND(
+                                COALESCE(
+                                    NULLIF(
+                                        DECODE(NVL(N.ADD_DISC_TYPE, 0),
+                                            2, NVL(N.ADD_DISC_AMT_DTL, 0),
+                                            DECODE(NVL(N.CLC_VAT_PRICE_TYP, 0),
+                                                2, GREATEST(NVL(N.ADD_DISC_AMT_MST_VAT, 0) - NVL(N.ADD_VAT_AMT, 0), 0),
+                                                NVL(N.ADD_DISC_AMT_MST, 0)
+                                            )
+                                        ),
+                                        0
+                                    ),
+                                    NULLIF(SUM(NVL(B.ADD_DISC_AMT_MST, 0) + NVL(B.ADD_DISC_AMT_DTL, 0)), 0),
+                                    NVL(N.ADD_DISCOUNT, 0)
+                                )
+                                + COALESCE(NULLIF(NVL(N.ADD_VAT_AMT, 0), 0), SUM(NVL(B.ADD_VAT_AMT, 0)), 0),
+                                2
+                            )
+                        ELSE ROUND(SUM(NVL(B.ADD_DISC_AMT_MST, 0) + NVL(B.ADD_DISC_AMT_DTL, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
+                    END
+                ) AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(N.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(N.A_CY), 'ر.س'))) AS CURRENCY,
                 NULL AS REMAINING_BALANCE,
                 NVL(N.DOC_DESC, 'خصم سداد') AS PAYMENT_METHOD,
@@ -496,7 +514,7 @@ ONYX_QUERIES = {
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(N.A_CY)
             WHERE N.DOC_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
             GROUP BY
-                N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
+                N.DOC_SER, N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
                 C.C_A_NAME, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.CUST_F_NM, CC.CUST_L_NM,
                 CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC,
                 N.ADD_DISC_TYPE, N.ADD_DISC_AMT_DTL, N.CLC_VAT_PRICE_TYP, N.ADD_DISC_AMT_MST_VAT, N.ADD_DISC_AMT_MST
@@ -510,11 +528,31 @@ ONYX_QUERIES = {
                 COALESCE(C.C_A_NAME, TRIM(CC.CUST_F_NM || ' ' || CC.CUST_L_NM), 'عميل') AS CUST_NAME,
                 COALESCE(C.C_MOBILE, C.C_PHONE, CC.MOBILE_NO, CC.TEL_NO) AS PHONE,
                 TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                CASE
-                    WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
-                        THEN ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
-                    ELSE ROUND(SUM(NVL(B.ADD_DISCOUNT, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
-                END AS AMOUNT,
+                COALESCE(
+                    NULLIF(
+                        (
+                            SELECT ROUND(SUM(ABS(NVL(P.AMT, 0))), 2)
+                            FROM IAS_POST_DTL P
+                            WHERE P.DOC_SER = N.DOC_SER
+                              AND P.AC_DTL_TYP = 3
+                              AND P.AC_CODE_DTL = TO_CHAR(COALESCE(N.C_CODE, B.C_CODE))
+                        ),
+                        0
+                    ),
+                    CASE
+                        WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
+                            THEN ROUND(
+                                COALESCE(
+                                    NULLIF(NVL(N.ADD_DISC_AMT_MST, 0) + NVL(N.ADD_DISC_AMT_DTL, 0), 0),
+                                    NULLIF(SUM(NVL(B.ADD_DISC_AMT_MST, 0) + NVL(B.ADD_DISC_AMT_DTL, 0)), 0),
+                                    NVL(N.ADD_DISCOUNT, 0)
+                                )
+                                + COALESCE(NULLIF(NVL(N.ADD_VAT_AMT, 0), 0), SUM(NVL(B.ADD_VAT_AMT, 0)), 0),
+                                2
+                            )
+                        ELSE ROUND(SUM(NVL(B.ADD_DISC_AMT_MST, 0) + NVL(B.ADD_DISC_AMT_DTL, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
+                    END
+                ) AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(N.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(N.A_CY), 'ر.س'))) AS CURRENCY,
                 NULL AS REMAINING_BALANCE,
                 NVL(N.DOC_DESC, 'خصم سداد') AS PAYMENT_METHOD,
@@ -531,9 +569,10 @@ ONYX_QUERIES = {
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(N.A_CY)
             WHERE N.DOC_DATE >= TRUNC(SYSDATE) - {SYNC_DAYS_BACK}
             GROUP BY
-                N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
+                N.DOC_SER, N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
                 C.C_A_NAME, C.C_MOBILE, C.C_PHONE, CC.CUST_F_NM, CC.CUST_L_NM,
-                CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC
+                CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC,
+                N.ADD_DISC_AMT_MST, N.ADD_DISC_AMT_DTL
             ORDER BY N.DOC_DATE DESC, N.DOC_NO DESC
             """,
         ],
@@ -1160,7 +1199,7 @@ _EXPECTED_FORMS_BY_DOC_TYPE = {
     "credit_sales_return": {160},
     "customer_discount_notice": {875},
     "price_quotation": {155, 158},
-    "purchase_order": {125},
+    "purchase_order": {125, 126},
     "receipt_voucher": {23, 21},
     "account_statement": {2502, 274},
     "direct_alert": {2502},
@@ -2091,14 +2130,14 @@ def _lookup_manual_doc_by_srl(
                 NULL,
                 'APST001',
                 NVL(A.PR_DESC, A.SIDE_REQ),
-                TO_CHAR(A.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
-                TO_CHAR(A.AD_U_ID)
+                TO_CHAR(NVL(A.APRV_DATE, A.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(NVL(A.APRV_U_ID, A.AD_U_ID))
             FROM P_REQUEST A
             LEFT JOIN V_DETAILS B ON B.V_CODE = A.V_CODE
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(A.A_CY)
             WHERE TO_CHAR(A.PR_SER) = :doc_srl
         """,
-        53: """
+        42: """
             SELECT
                 'PO-' || TO_CHAR(P.PO_NO),
                 'purchase_order',
@@ -2125,8 +2164,8 @@ def _lookup_manual_doc_by_srl(
                 NULL,
                 'PO',
                 P.PO_DESC,
-                TO_CHAR(P.AD_DATE, 'YYYY-MM-DD"T"HH24:MI:SS'),
-                TO_CHAR(P.AD_U_ID)
+                TO_CHAR(NVL(P.APRV_DATE, P.AD_DATE), 'YYYY-MM-DD"T"HH24:MI:SS'),
+                TO_CHAR(NVL(P.APRV_U_ID, P.AD_U_ID))
             FROM P_ORDER P
             LEFT JOIN V_DETAILS V ON V.V_CODE = P.V_CODE
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(P.CUR_CODE)
@@ -2146,22 +2185,40 @@ def _lookup_manual_doc_by_srl(
                     NULLIF(TRIM(CC.TEL_NO), '')
                 ),
                 TO_CHAR(N.DOC_DATE, 'YYYY-MM-DD'),
-                CASE
-                    WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
-                        THEN COALESCE(
-                            NULLIF(ROUND(
-                                DECODE(NVL(N.ADD_DISC_TYPE, 0),
-                                    2, NVL(N.ADD_DISC_AMT_DTL, 0) + NVL(N.ADD_VAT_AMT, 0),
-                                    DECODE(NVL(N.CLC_VAT_PRICE_TYP, 0),
-                                        2, NVL(N.ADD_DISC_AMT_MST_VAT, 0),
-                                        NVL(N.ADD_DISC_AMT_MST, 0) + NVL(N.ADD_VAT_AMT, 0)
-                                    )
-                                ), 2
-                            ), 0),
-                            ROUND(NVL(N.ADD_DISCOUNT, 0) + NVL(N.ADD_VAT_AMT, 0), 2)
-                        )
-                    ELSE ROUND(SUM(NVL(B.ADD_DISCOUNT, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
-                END,
+                COALESCE(
+                    NULLIF(
+                        (
+                            SELECT ROUND(SUM(ABS(NVL(P.AMT, 0))), 2)
+                            FROM IAS_POST_DTL P
+                            WHERE P.DOC_SER = N.DOC_SER
+                              AND P.AC_DTL_TYP = 3
+                              AND P.AC_CODE_DTL = TO_CHAR(COALESCE(N.C_CODE, B.C_CODE))
+                        ),
+                        0
+                    ),
+                    CASE
+                        WHEN N.C_CODE IS NOT NULL OR N.C_CODE_CSH IS NOT NULL
+                            THEN ROUND(
+                                COALESCE(
+                                    NULLIF(
+                                        DECODE(NVL(N.ADD_DISC_TYPE, 0),
+                                            2, NVL(N.ADD_DISC_AMT_DTL, 0),
+                                            DECODE(NVL(N.CLC_VAT_PRICE_TYP, 0),
+                                                2, GREATEST(NVL(N.ADD_DISC_AMT_MST_VAT, 0) - NVL(N.ADD_VAT_AMT, 0), 0),
+                                                NVL(N.ADD_DISC_AMT_MST, 0)
+                                            )
+                                        ),
+                                        0
+                                    ),
+                                    NULLIF(SUM(NVL(B.ADD_DISC_AMT_MST, 0) + NVL(B.ADD_DISC_AMT_DTL, 0)), 0),
+                                    NVL(N.ADD_DISCOUNT, 0)
+                                )
+                                + COALESCE(NULLIF(NVL(N.ADD_VAT_AMT, 0), 0), SUM(NVL(B.ADD_VAT_AMT, 0)), 0),
+                                2
+                            )
+                        ELSE ROUND(SUM(NVL(B.ADD_DISC_AMT_MST, 0) + NVL(B.ADD_DISC_AMT_DTL, 0) + NVL(B.ADD_VAT_AMT, 0)), 2)
+                    END
+                ),
                 DECODE(UPPER(TRIM(TO_CHAR(N.A_CY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(N.A_CY), 'ر.س'))),
                 NULL,
                 NVL(N.DOC_DESC, 'خصم سداد'),
@@ -2176,7 +2233,7 @@ def _lookup_manual_doc_by_srl(
             LEFT JOIN EX_RATE E ON TO_CHAR(E.CUR_CODE) = TO_CHAR(N.A_CY)
             WHERE TO_CHAR(N.DOC_SER) = :doc_srl
             GROUP BY
-                N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
+                N.DOC_SER, N.DOC_NO, N.DOC_DATE, N.A_CY, E.CUR_NAME, N.C_CODE, B.C_CODE, N.C_CODE_CSH,
                 C.C_A_NAME, C.C_WHATSAPP_NO, C.C_MOBILE, C.C_PHONE, CC.CUST_F_NM, CC.CUST_L_NM,
                 CC.MOBILE_NO, CC.TEL_NO, N.ADD_DISCOUNT, N.ADD_VAT_AMT, N.DOC_DESC,
                 N.ADD_DISC_TYPE, N.ADD_DISC_AMT_DTL, N.CLC_VAT_PRICE_TYP, N.ADD_DISC_AMT_MST_VAT, N.ADD_DISC_AMT_MST
@@ -2369,7 +2426,7 @@ def _process_manual_button_sends(
             target_phone = clean_phone_number(mob_val)
             manual_doc = None
 
-            if msg_typ == 99 and doc_typ in (4, 5, 52, 2, 40, 53, 15) and doc_srl:
+            if msg_typ == 99 and doc_typ in (4, 5, 52, 2, 40, 42, 15) and doc_srl:
                 manual_doc = _lookup_manual_doc_by_srl(
                     cursor, doc_typ, doc_srl, target_phone, balances_by_cust
                 )
@@ -2529,7 +2586,7 @@ def main():
                 else:
                     pdf_uploaded = row[0]
                     age_sec = doc.get("_age_seconds")
-                    max_late_age = 259200 if doc.get("doc_type") == "price_quotation" else 86400
+                    max_late_age = 259200
                     if not pdf_uploaded and age_sec is not None and -60 <= age_sec <= max_late_age:
                         recent_missing_pdf_docs.append(doc)
 
@@ -2563,6 +2620,7 @@ def main():
                         "sales_return",
                         "credit_sales_return",
                         "price_quotation",
+                        "purchase_order",
                         "customer_discount_notice",
                         "account_statement",
                         "receipt_voucher",
@@ -2602,7 +2660,7 @@ def main():
 
             late_uploaded = 0
             for doc in recent_missing_pdf_docs:
-                if late_uploaded >= 5:
+                if late_uploaded >= 25:
                     break
                 local_pdf = _find_local_onyx_pdf(doc, pdf_index, used_pdf_paths)
                 if local_pdf:
