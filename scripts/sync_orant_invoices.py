@@ -101,14 +101,13 @@ ONYX_QUERIES = {
                 ) AS PHONE,
                 TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
                 ROUND(
-                    NVL((
-                        SELECT SUM(
-                            (NVL(D.I_QTY, 0) * (NVL(D.I_PRICE, 0) - NVL(D.DIS_AMT, 0)))
-                            + (NVL(D.I_QTY, 0) * NVL(D.VAT_AMT, 0))
-                        )
-                        FROM IAS_BILL_DTL D
-                        WHERE D.BILL_SER = M.BILL_SER
-                    ), 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0),
+                    NVL(M.BILL_AMT, 0)
+                    + NVL(M.VAT_AMT, 0)
+                    + NVL(M.OTHR_AMT, 0)
+                    + NVL(M.VAT_AMT_OTHR, 0)
+                    - NVL(M.DISC_AMT_MST, 0)
+                    - NVL(M.DISC_AMT_DTL, 0)
+                    - NVL(M.DISC_AMT_AFTR_VAT, 0),
                     2
                 ) AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س'))) AS CURRENCY,
@@ -143,7 +142,7 @@ ONYX_QUERIES = {
                         )
                         FROM IAS_BILL_DTL D
                         WHERE D.BILL_SER = M.BILL_SER
-                    ), 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0),
+                    ), 0) + NVL(M.OTHR_AMT, 0),
                     2
                 ) AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س'))) AS CURRENCY,
@@ -182,7 +181,27 @@ ONYX_QUERIES = {
                     NULLIF(TRIM(M.C_TEL), '')
                 ) AS PHONE,
                 TO_CHAR(M.RT_BILL_DATE, 'YYYY-MM-DD') AS DOC_DATE,
-                ROUND(NVL(M.BILL_AMT, 0) + NVL(M.VAT_AMT, 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0), 2) AS AMOUNT,
+                COALESCE(
+                    NULLIF(
+                        (
+                            SELECT ROUND(SUM(CASE WHEN P.AC_DTL_TYP IN (1, 2, 3) AND P.CR_AMT > 0 THEN P.CR_AMT ELSE 0 END), 2)
+                            FROM IAS_POST_DTL P
+                            WHERE P.DOC_TYPE = 5
+                              AND P.DOC_SER = M.RT_BILL_SER
+                        ),
+                        0
+                    ),
+                    ROUND(
+                        NVL(M.BILL_AMT, 0)
+                        + NVL(M.VAT_AMT, 0)
+                        + NVL(M.OTHR_AMT, 0)
+                        + NVL(M.VAT_AMT_OTHR, 0)
+                        - NVL(M.DISC_AMT_MST, 0)
+                        - NVL(M.DISC_AMT_DTL, 0)
+                        - NVL(M.DISC_AMT_AFTR_VAT, 0),
+                        2
+                    )
+                ) AS AMOUNT,
                 DECODE(UPPER(TRIM(TO_CHAR(M.RT_BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.RT_BILL_CURRENCY), 'ر.س'))) AS CURRENCY,
                 NULL AS REMAINING_BALANCE,
                 CASE WHEN NVL(M.RT_BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END AS PAYMENT_METHOD,
@@ -348,7 +367,7 @@ ONYX_QUERIES = {
                                 )
                                 FROM QUOTATION_DETAIL QD
                                 WHERE QD.QUOT_SER = Q.QUOT_SER
-                            ), 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
+                            ), 0) + NVL(Q.OTHR_AMT, 0)
                     END,
                     2
                 ) AS AMOUNT,
@@ -1977,14 +1996,13 @@ def _lookup_manual_doc_by_srl(
                 ),
                 TO_CHAR(M.BILL_DATE, 'YYYY-MM-DD'),
                 ROUND(
-                    NVL((
-                        SELECT SUM(
-                            (NVL(D.I_QTY, 0) * (NVL(D.I_PRICE, 0) - NVL(D.DIS_AMT, 0)))
-                            + (NVL(D.I_QTY, 0) * NVL(D.VAT_AMT, 0))
-                        )
-                        FROM IAS_BILL_DTL D
-                        WHERE D.BILL_SER = M.BILL_SER
-                    ), 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0),
+                    NVL(M.BILL_AMT, 0)
+                    + NVL(M.VAT_AMT, 0)
+                    + NVL(M.OTHR_AMT, 0)
+                    + NVL(M.VAT_AMT_OTHR, 0)
+                    - NVL(M.DISC_AMT_MST, 0)
+                    - NVL(M.DISC_AMT_DTL, 0)
+                    - NVL(M.DISC_AMT_AFTR_VAT, 0),
                     2
                 ),
                 DECODE(UPPER(TRIM(TO_CHAR(M.BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.BILL_CURRENCY), 'ر.س'))),
@@ -2015,7 +2033,27 @@ def _lookup_manual_doc_by_srl(
                     NULLIF(TRIM(M.C_TEL), '')
                 ),
                 TO_CHAR(M.RT_BILL_DATE, 'YYYY-MM-DD'),
-                ROUND(NVL(M.BILL_AMT, 0) + NVL(M.VAT_AMT, 0) - NVL(M.DISC_AMT, 0) + NVL(M.OTHR_AMT, 0), 2),
+                COALESCE(
+                    NULLIF(
+                        (
+                            SELECT ROUND(SUM(CASE WHEN P.AC_DTL_TYP IN (1, 2, 3) AND P.CR_AMT > 0 THEN P.CR_AMT ELSE 0 END), 2)
+                            FROM IAS_POST_DTL P
+                            WHERE P.DOC_TYPE = 5
+                              AND P.DOC_SER = M.RT_BILL_SER
+                        ),
+                        0
+                    ),
+                    ROUND(
+                        NVL(M.BILL_AMT, 0)
+                        + NVL(M.VAT_AMT, 0)
+                        + NVL(M.OTHR_AMT, 0)
+                        + NVL(M.VAT_AMT_OTHR, 0)
+                        - NVL(M.DISC_AMT_MST, 0)
+                        - NVL(M.DISC_AMT_DTL, 0)
+                        - NVL(M.DISC_AMT_AFTR_VAT, 0),
+                        2
+                    )
+                ),
                 DECODE(UPPER(TRIM(TO_CHAR(M.RT_BILL_CURRENCY))), 'SAR', 'ر.س', NVL(E.CUR_NAME, NVL(TO_CHAR(M.RT_BILL_CURRENCY), 'ر.س'))),
                 NULL,
                 CASE WHEN NVL(M.RT_BILL_DOC_TYPE, 1) = 1 THEN 'نقداً' ELSE 'آجل' END,
@@ -2056,7 +2094,7 @@ def _lookup_manual_doc_by_srl(
                                 )
                                 FROM QUOTATION_DETAIL QD
                                 WHERE QD.QUOT_SER = Q.QUOT_SER
-                            ), 0) - NVL(Q.DISC_AMT, 0) + NVL(Q.VAT_AMT, 0) + NVL(Q.OTHR_AMT, 0)
+                            ), 0) + NVL(Q.OTHR_AMT, 0)
                     END,
                     2
                 ),
